@@ -15,11 +15,25 @@ QBIT_CATEGORY = os.getenv("QBIT_CATEGORY", "omniarr")
 PLEX_URL = os.getenv("PLEX_URL", "http://plex:32400")
 PLEX_TOKEN = os.getenv("PLEX_TOKEN", "")
 
-DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR", "/data/torrents"))
-DEST_DIRS = {
-    "movie": Path(os.getenv("MOVIES_DIR", "/data/media/movies")),
-    "tv": Path(os.getenv("TV_DIR", "/data/media/tv")),
-    "music": Path(os.getenv("MUSIC_DIR", "/data/media/music")),
+# Remote Path Mapping (Translate qBittorrent's reported path -> OmniArr's local mount)
+QBIT_REMOTE_PATH = os.getenv("QBIT_REMOTE_PATH", "/downloads")
+QBIT_LOCAL_MOUNT = os.getenv("QBIT_LOCAL_MOUNT", "/mnt/qbit_downloads")
+
+# Configure all your bound Plex media folders across drives
+MEDIA_ROOTS = {
+    "movie": [
+        Path("/mnt/drive1/Movies"),
+        Path("/mnt/drive2/Movies"),
+        Path("/mnt/drive3/Movies"),
+    ],
+    "tv": [
+        Path("/mnt/drive1/TV Shows"),
+        Path("/mnt/drive2/TV Shows"),
+        Path("/mnt/drive3/TV Shows"),
+    ],
+    "music": [
+        Path("/mnt/drive1/Music"),
+    ],
 }
 
 QUALITY_KEYWORDS = {
@@ -30,8 +44,24 @@ QUALITY_KEYWORDS = {
     "any": [""]
 }
 
+def translate_qbit_path(remote_path: str) -> Path:
+    """Translates qBittorrent's remote path to OmniArr's local SMB/NFS mount."""
+    normalized = remote_path.replace("\\", "/")
+    if QBIT_REMOTE_PATH and normalized.startswith(QBIT_REMOTE_PATH):
+        relative = normalized[len(QBIT_REMOTE_PATH):].lstrip("/")
+        return Path(QBIT_LOCAL_MOUNT) / relative
+    return Path(normalized)
+
+def get_best_dest_dir(media_type: str) -> Path:
+    """Selects the Plex drive folder with the most free space."""
+    candidates = [p for p in MEDIA_ROOTS.get(media_type, []) if p.exists()]
+    if not candidates:
+        fallback = MEDIA_ROOTS[media_type][0]
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+    return max(candidates, key=lambda p: shutil.disk_usage(p).free)
+
 async def search_prowlarr(query: str, media_type: str, quality: str = "1080p"):
-    """Queries Prowlarr's unified search API and filters by quality."""
     cat_map = {"movie": [2000], "tv": [5000], "music": [3000]}
     params = {"query": query, "type": "search"}
     for c in cat_map.get(media_type, []):
@@ -48,12 +78,10 @@ async def search_prowlarr(query: str, media_type: str, quality: str = "1080p"):
         r for r in results
         if any(k in r.get("title", "").lower() for k in keywords) and r.get("seeders", 0) > 0
     ]
-    # Sort by seeders descending
     filtered.sort(key=lambda x: x.get("seeders", 0), reverse=True)
     return filtered
 
 async def send_to_qbittorrent(download_url: str, item_id: int) -> str:
-    """Logs into qBittorrent and adds the torrent with a tracking tag."""
     tag = f"omniarr_{item_id}"
     async with httpx.AsyncClient(timeout=15.0) as client:
         await client.post(
@@ -68,13 +96,11 @@ async def send_to_qbittorrent(download_url: str, item_id: int) -> str:
                 "tags": tag
             }
         )
-        # Retrieve hash via tag
         resp = await client.get(f"{QBIT_URL}/api/v2/torrents/info", params={"tag": tag})
         torrents = resp.json()
         return torrents[0]["hash"] if torrents else ""
 
 async def trigger_plex_scan():
-    """Notifies Plex to scan updated library sections."""
     if not PLEX_TOKEN:
         return
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -90,7 +116,6 @@ def hardlink_or_copy(src: Path, dst: Path):
         shutil.copy2(src, dst)
 
 async def check_downloads_and_import(db: Session):
-    """Background worker: checks qBittorrent for completed grabs and imports them."""
     downloading = db.query(MediaItem).filter(MediaItem.status == "downloading").all()
     if not downloading:
         return
@@ -109,9 +134,9 @@ async def check_downloads_and_import(db: Session):
         if not t:
             continue
         if t.get("progress", 0) >= 1.0:
-            content_path = Path(t["content_path"])
+            content_path = translate_qbit_path(t["content_path"])
             clean_name = re.sub(r'[\\/*?:"<>|]', "", f"{item.title} ({item.year})" if item.year else item.title)
-            target_base = DEST_DIRS[item.media_type] / clean_name
+            target_base = get_best_dest_dir(item.media_type) / clean_name
 
             if content_path.is_file():
                 hardlink_or_copy(content_path, target_base / content_path.name)
