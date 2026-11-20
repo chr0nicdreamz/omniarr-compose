@@ -1,3 +1,5 @@
+from pathlib import Path
+import shutil
 import os
 import json
 import httpx
@@ -12,7 +14,7 @@ from .database import engine, Base, get_db, SessionLocal
 from .models import MediaItem, EpisodeItem, IndexerConfig, QualityProfile, CustomFormat
 from .services import (
     search_prowlarr, send_to_qbittorrent, check_downloads_and_import,
-    get_settings, save_settings, get_drive_stats, sync_posters_from_plex
+    get_settings, save_settings, get_drive_stats, get_media_roots, sync_posters_from_plex
 )
 from .importer import parse_and_import_backup
 
@@ -75,7 +77,14 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
     indexers = db.query(IndexerConfig).order_by(IndexerConfig.priority.asc(), IndexerConfig.name.asc()).all()
     profiles = db.query(QualityProfile).order_by(QualityProfile.name.asc()).all()
     custom_formats = db.query(CustomFormat).order_by(CustomFormat.name.asc()).all()
-    drives = get_drive_stats()
+    drives = get_drive_stats(db)
+    roots_map = get_media_roots(db)
+    root_folders = []
+    for m_type, paths in roots_map.items():
+        for p in paths:
+            exists = p.exists()
+            free_gb = round(shutil.disk_usage(p).free / (1024**3), 1) if exists else None
+            root_folders.append({"media_type": m_type, "path": str(p), "exists": exists, "free_gb": free_gb})
 
     return templates.TemplateResponse("index.html", {
         "request": request,
@@ -86,6 +95,7 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
         "profiles": profiles,
         "custom_formats": custom_formats,
         "drives": drives,
+        "root_folders": root_folders,
         "active_tab": tab,
         "sort": sort,
         "msg": msg,
@@ -181,6 +191,95 @@ async def update_settings(request: Request, db: Session = Depends(get_db)):
     save_settings(db, updates)
     return RedirectResponse(url=f"/?tab={section}&msg=Settings+saved", status_code=303)
 
+@app.get("/api/filesystem")
+def browse_filesystem(path: str = ""):
+    """Lists mounted drives from /proc/mounts and subdirectories for a Sonarr/Radarr-style folder picker."""
+    skip_fs = {"proc", "sysfs", "devtmpfs", "devpts", "tmpfs", "cgroup", "cgroup2", "pstore", "bpf", "tracefs", "debugfs", "mqueue", "hugetlbfs", "fusectl", "configfs", "overlay", "squashfs", "nsfs"}
+    skip_prefixes = ("/proc", "/sys", "/dev", "/run", "/etc", "/var/lib", "/usr", "/boot")
+    mounts = []
+    seen_mounts = set()
+    try:
+        with open("/proc/mounts", "r") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                mp, fstype = parts[1], parts[2]
+                if fstype in skip_fs or any(mp == p or mp.startswith(p + "/") for p in skip_prefixes):
+                    continue
+                if mp not in seen_mounts and Path(mp).exists():
+                    seen_mounts.add(mp)
+                    try:
+                        du = shutil.disk_usage(mp)
+                        free_gb = round(du.free / (1024**3), 1)
+                        total_gb = round(du.total / (1024**3), 1)
+                    except Exception:
+                        free_gb, total_gb = 0.0, 0.0
+                    mounts.append({"path": mp, "fstype": fstype, "free_gb": free_gb, "total_gb": total_gb})
+    except Exception:
+        pass
+
+    # Include common media roots if they exist even on single-disk setups
+    for common in ("/mnt", "/media", "/data"):
+        if common not in seen_mounts and Path(common).exists():
+            du = shutil.disk_usage(common)
+            mounts.append({
+                "path": common,
+                "fstype": "dir",
+                "free_gb": round(du.free / (1024**3), 1),
+                "total_gb": round(du.total / (1024**3), 1)
+            })
+
+    mounts.sort(key=lambda m: m["path"])
+
+    current_path = path.strip()
+    dirs = []
+    parent_path = ""
+    if current_path:
+        p = Path(current_path)
+        if p.exists() and p.is_dir():
+            parent_path = str(p.parent) if str(p) != "/" else ""
+            try:
+                for entry in sorted(p.iterdir(), key=lambda x: x.name.lower()):
+                    if entry.is_dir() and not entry.name.startswith("."):
+                        dirs.append({"name": entry.name, "path": str(entry)})
+            except PermissionError:
+                pass
+
+    return {
+        "current_path": current_path,
+        "parent_path": parent_path,
+        "mounts": mounts,
+        "directories": dirs
+    }
+
+@app.post("/settings/roots/add")
+async def add_root_folder(media_type: str = Form(...), path: str = Form(...), create_dir: str = Form("false"), db: Session = Depends(get_db)):
+    clean_path = path.strip()
+    if not clean_path or media_type not in ("movie", "tv", "music"):
+        return RedirectResponse(url="/?tab=media&msg=Invalid+root+folder+path", status_code=303)
+    p_obj = Path(clean_path)
+    if create_dir == "true" and not p_obj.exists():
+        try:
+            p_obj.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return RedirectResponse(url=f"/?tab=media&msg=Failed+to+create+directory:+{str(e).replace(' ', '+')}", status_code=303)
+    roots_map = get_media_roots(db)
+    current = [str(p) for p in roots_map.get(media_type, [])]
+    if clean_path not in current:
+        current.append(clean_path)
+    save_settings(db, {f"{media_type}_roots": ",".join(current)})
+    return RedirectResponse(url="/?tab=media&msg=Root+folder+added", status_code=303)
+
+@app.post("/settings/roots/delete")
+async def delete_root_folder(media_type: str = Form(...), path: str = Form(...), db: Session = Depends(get_db)):
+    if media_type not in ("movie", "tv", "music"):
+        return RedirectResponse(url="/?tab=media", status_code=303)
+    roots_map = get_media_roots(db)
+    remaining = [str(p) for p in roots_map.get(media_type, []) if str(p) != path.strip()]
+    save_settings(db, {f"{media_type}_roots": ",".join(remaining)})
+    return RedirectResponse(url="/?tab=media&msg=Root+folder+removed", status_code=303)
+
 @app.post("/settings/indexers")
 async def update_indexers(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
@@ -241,11 +340,16 @@ def arr_quality_profiles(db: Session = Depends(get_db)):
     ]
 
 @app.get("/api/v3/rootfolder", dependencies=[Depends(verify_api_key)])
-def arr_root_folders():
-    return [
-        {"id": 1, "path": "/mnt/plex_g/Movies"},
-        {"id": 2, "path": "/mnt/plex_g/Tv Shows"},
-    ]
+def arr_root_folders(db: Session = Depends(get_db)):
+    roots_map = get_media_roots(db)
+    out = []
+    idx = 1
+    for m_type in ("movie", "tv", "music"):
+        for p in roots_map.get(m_type, []):
+            free_space = shutil.disk_usage(p).free if p.exists() else 0
+            out.append({"id": idx, "path": str(p), "accessible": p.exists(), "freeSpace": free_space})
+            idx += 1
+    return out
 
 @app.get("/api/v3/movie", dependencies=[Depends(verify_api_key)])
 def seerr_get_movies(tmdbId: int = None, db: Session = Depends(get_db)):

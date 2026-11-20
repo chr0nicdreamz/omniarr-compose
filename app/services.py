@@ -7,52 +7,42 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 from .models import MediaItem, AppSetting, IndexerConfig, QualityProfile, CustomFormat
 
+def _parse_roots(env_key: str, default_paths: list[str]) -> list[Path]:
+    raw = os.getenv(env_key, "")
+    if raw.strip():
+        return [Path(p.strip()) for p in raw.split(",") if p.strip()]
+    return [Path(p) for p in default_paths]
+
 MEDIA_ROOTS = {
-    "movie": [
-        Path("/mnt/plex_g/Movies"),
-        Path("/mnt/plex_h/Movies"),
-        Path("/mnt/plex_i/Movies"),
-        Path("/mnt/plex_j/Movies"),
-        Path("/mnt/plex_l/Movies"),
-        Path("/mnt/plex_m/Movies"),
-        Path("/mnt/plex_n/Movies"),
-        Path("/mnt/plex_o/Movies"),
-        Path("/mnt/plex_p/Moviez"),
-        Path("/mnt/plex_q/Movies"),
-        Path("/mnt/plex_r/Movies"),
-    ],
-    "tv": [
-        Path("/mnt/plex_g/Tv Shows"),
-        Path("/mnt/plex_h/TV"),
-        Path("/mnt/plex_i/TV Shows"),
-        Path("/mnt/plex_j/TV"),
-        Path("/mnt/plex_l/TV"),
-        Path("/mnt/plex_m/TV Shows"),
-        Path("/mnt/plex_n/TV"),
-        Path("/mnt/plex_o/TV"),
-        Path("/mnt/plex_p/TV"),
-        Path("/mnt/plex_q/TV"),
-        Path("/mnt/plex_r/TV"),
-    ],
-    "music": [
-        Path("/mnt/plex_i/Music"),
-        Path("/mnt/plex_m/Music"),
-        Path("/mnt/plex_o/Music"),
-        Path("/mnt/plex_p/Music"),
-        Path("/mnt/plex_r/Music"),
-    ],
+    "movie": _parse_roots("OMNIARR_MOVIE_ROOTS", ["/data/media/movies"]),
+    "tv": _parse_roots("OMNIARR_TV_ROOTS", ["/data/media/tv"]),
+    "music": _parse_roots("OMNIARR_MUSIC_ROOTS", ["/data/media/music"]),
 }
 
+def get_media_roots(db: Session = None) -> dict[str, list[Path]]:
+    """Returns configured root folders from SQLite settings, falling back to env vars / defaults."""
+    if db is None:
+        return MEDIA_ROOTS
+    cfg = get_settings(db)
+    resolved = {}
+    for m_type in ("movie", "tv", "music"):
+        raw = cfg.get(f"{m_type}_roots", "").strip()
+        if raw:
+            resolved[m_type] = [Path(p.strip()) for p in raw.split(",") if p.strip()]
+        else:
+            resolved[m_type] = list(MEDIA_ROOTS[m_type])
+    return resolved
+
 DEFAULT_SETTINGS = {
-    "omniarr_api_key": os.getenv("OMNIARR_API_KEY", "876fcca01ac7bf5b7edf1ca5c56003d4"),
-    "prowlarr_url": os.getenv("PROWLARR_URL", "http://192.168.11.193:9696"),
+    "omniarr_api_key": os.getenv("OMNIARR_API_KEY", "change_me_to_a_secure_key"),
+    "prowlarr_url": os.getenv("PROWLARR_URL", "http://localhost:9696"),
     "prowlarr_api_key": os.getenv("PROWLARR_API_KEY", ""),
-    "plex_url": os.getenv("PLEX_URL", "http://192.168.11.115:32400"),
+    "plex_url": os.getenv("PLEX_URL", "http://localhost:32400"),
     "plex_token": os.getenv("PLEX_TOKEN", ""),
     "plex_notify_grab": "false",
     "plex_notify_import": "true",
-    "qbit_url": os.getenv("QBIT_URL", "http://192.168.11.166:6996"),
-    "qbit_user": os.getenv("QBIT_USER", "hydr0"),
+    "qbit_url": os.getenv("QBIT_URL", "http://localhost:8080"),
+    "qbit_user": os.getenv("QBIT_USER", "admin"),
     "qbit_pass": os.getenv("QBIT_PASS", ""),
     "qbit_category": os.getenv("QBIT_CATEGORY", "omniarr"),
     "qbit_remote_path": os.getenv("QBIT_REMOTE_PATH", "plex_e/NAS/Downloads"),
@@ -60,6 +50,9 @@ DEFAULT_SETTINGS = {
     "import_mode": "hardlink",
     "remove_completed_download": "false",
     "min_free_space_gb": "20",
+    "movie_roots": "",
+    "tv_roots": "",
+    "music_roots": "",
     "movie_folder_format": "{Title} ({Year})",
     "tv_folder_format": "{Title} ({Year})",
     "music_folder_format": "{Title}",
@@ -101,10 +94,10 @@ def save_settings(db: Session, updates: dict):
             db.add(AppSetting(key=k, value=str(v)))
     db.commit()
 
-def get_drive_stats() -> list:
+def get_drive_stats(db: Session = None) -> list:
     seen = set()
     drives = []
-    for roots in MEDIA_ROOTS.values():
+    for roots in get_media_roots(db).values():
         for p in roots:
             mount = p.parent
             if str(mount) in seen:
@@ -127,11 +120,13 @@ def translate_qbit_path(remote_path: str, cfg: dict) -> Path:
         return Path(cfg["qbit_local_mount"]) / relative
     return Path(normalized)
 
-def get_best_dest_dir(media_type: str, cfg: dict) -> Path:
+def get_best_dest_dir(media_type: str, cfg: dict, db: Session = None) -> Path:
     min_free_bytes = float(cfg.get("min_free_space_gb", 20)) * (1024**3)
-    candidates = [p for p in MEDIA_ROOTS.get(media_type, []) if p.exists()]
+    roots_map = get_media_roots(db)
+    type_roots = roots_map.get(media_type, MEDIA_ROOTS[media_type])
+    candidates = [p for p in type_roots if p.exists()]
     if not candidates:
-        fallback = MEDIA_ROOTS[media_type][0]
+        fallback = type_roots[0]
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback
     eligible = [p for p in candidates if shutil.disk_usage(p).free >= min_free_bytes]
@@ -339,7 +334,7 @@ async def check_downloads_and_import(db: Session):
             template = cfg.get(fmt_key, "{Title} ({Year})")
             folder_name = template.replace("{Title}", item.title).replace("{Year}", str(item.year or "")).replace("()", "").strip()
             clean_name = re.sub(r'[\\/*?:"<>|]', "", folder_name)
-            target_base = get_best_dest_dir(item.media_type, cfg) / clean_name
+            target_base = get_best_dest_dir(item.media_type, cfg, db) / clean_name
 
             if content_path.is_file():
                 transfer_file(content_path, target_base / content_path.name, mode)
