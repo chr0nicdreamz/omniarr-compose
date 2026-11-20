@@ -1,10 +1,11 @@
 import os
+import json
 import shutil
 import httpx
 import re
 from pathlib import Path
 from sqlalchemy.orm import Session
-from .models import MediaItem, AppSetting, IndexerConfig
+from .models import MediaItem, AppSetting, IndexerConfig, QualityProfile, CustomFormat
 
 MEDIA_ROOTS = {
     "movie": [
@@ -43,7 +44,6 @@ MEDIA_ROOTS = {
 }
 
 DEFAULT_SETTINGS = {
-    # General & Connect
     "omniarr_api_key": os.getenv("OMNIARR_API_KEY", "876fcca01ac7bf5b7edf1ca5c56003d4"),
     "prowlarr_url": os.getenv("PROWLARR_URL", "http://192.168.11.193:9696"),
     "prowlarr_api_key": os.getenv("PROWLARR_API_KEY", ""),
@@ -51,21 +51,18 @@ DEFAULT_SETTINGS = {
     "plex_token": os.getenv("PLEX_TOKEN", ""),
     "plex_notify_grab": "false",
     "plex_notify_import": "true",
-    # Download Client
     "qbit_url": os.getenv("QBIT_URL", "http://192.168.11.166:6996"),
     "qbit_user": os.getenv("QBIT_USER", "hydr0"),
     "qbit_pass": os.getenv("QBIT_PASS", ""),
     "qbit_category": os.getenv("QBIT_CATEGORY", "omniarr"),
     "qbit_remote_path": os.getenv("QBIT_REMOTE_PATH", "plex_e/NAS/Downloads"),
     "qbit_local_mount": os.getenv("QBIT_LOCAL_MOUNT", "/mnt/plex_e/NAS/Downloads"),
-    # Media Management
-    "import_mode": "hardlink",  # hardlink, copy, move
+    "import_mode": "hardlink",
     "remove_completed_download": "false",
     "min_free_space_gb": "20",
     "movie_folder_format": "{Title} ({Year})",
     "tv_folder_format": "{Title} ({Year})",
     "music_folder_format": "{Title}",
-    # Profiles & Custom Formats
     "default_movie_quality": "1080p",
     "default_tv_quality": "1080p",
     "default_music_quality": "lossless",
@@ -141,9 +138,30 @@ def get_best_dest_dir(media_type: str, cfg: dict) -> Path:
     pool = eligible if eligible else candidates
     return max(pool, key=lambda p: shutil.disk_usage(p).free)
 
-def score_release(release: dict, cfg: dict) -> int:
+def evaluate_custom_formats(title: str, profile_name: str, db: Session) -> tuple[int, int]:
+    """Returns (total_cf_score, min_required_score) using imported Sonarr/Radarr Custom Formats."""
+    profile = db.query(QualityProfile).filter_by(name=profile_name).first()
+    scores_map = json.loads(profile.format_scores_json) if profile and profile.format_scores_json else {}
+    min_score = profile.min_format_score if profile else 0
+
+    total_score = 0
+    for cf in db.query(CustomFormat).all():
+        weight = scores_map.get(str(cf.external_cf_id), cf.default_score)
+        if not weight:
+            continue
+        patterns = json.loads(cf.regex_patterns_json or "[]")
+        for pat in patterns:
+            try:
+                if re.search(pat, title, re.IGNORECASE):
+                    total_score += int(weight)
+                    break
+            except re.error:
+                continue
+    return total_score, min_score
+
+def score_release(release: dict, cfg: dict, cf_score: int = 0) -> int:
     title = release.get("title", "").lower()
-    score = release.get("seeders", 0)
+    score = release.get("seeders", 0) + cf_score
     preferred = [k.strip().lower() for k in cfg.get("preferred_keywords", "").split(",") if k.strip()]
     for kw in preferred:
         if kw in title:
@@ -169,11 +187,20 @@ async def search_prowlarr(query: str, media_type: str, quality: str, db: Session
     min_seeders = int(cfg.get("min_seeders", 1))
     max_size_bytes = float(cfg.get("max_size_gb", 100)) * (1024**3)
     blocked = [k.strip().lower() for k in cfg.get("blocked_keywords", "").split(",") if k.strip()]
-    keywords = QUALITY_KEYWORDS.get(quality.lower(), [""])
 
-    filtered = []
+    # Match either built-in quality tier or imported QualityProfile cutoff
+    profile_obj = db.query(QualityProfile).filter_by(name=quality).first()
+    effective_quality = (profile_obj.cutoff if profile_obj else quality).lower()
+    keywords = QUALITY_KEYWORDS.get(effective_quality, [""])
+    for tier, kws in QUALITY_KEYWORDS.items():
+        if tier in effective_quality:
+            keywords = kws
+            break
+
+    scored_releases = []
     for r in results:
-        title_l = r.get("title", "").lower()
+        raw_title = r.get("title", "")
+        title_l = raw_title.lower()
         indexer_l = r.get("indexer", "").lower()
         if indexer_l in disabled_indexers:
             continue
@@ -185,10 +212,60 @@ async def search_prowlarr(query: str, media_type: str, quality: str, db: Session
             continue
         if not any(k in title_l for k in keywords):
             continue
-        filtered.append(r)
 
-    filtered.sort(key=lambda x: score_release(x, cfg), reverse=True)
-    return filtered
+        cf_score, min_cf_score = evaluate_custom_formats(raw_title, quality, db)
+        if cf_score < min_cf_score:
+            continue
+
+        r["_omni_score"] = score_release(r, cfg, cf_score)
+        scored_releases.append(r)
+
+    scored_releases.sort(key=lambda x: x.get("_omni_score", 0), reverse=True)
+    return scored_releases
+
+async def sync_posters_from_plex(db: Session) -> int:
+    """Matches OmniArr library items against Plex metadata to populate poster_url."""
+    cfg = get_settings(db)
+    plex_url = cfg.get("plex_url", "").rstrip("/")
+    token = cfg.get("plex_token", "")
+    if not plex_url or not token:
+        return 0
+
+    updated = 0
+    headers = {"Accept": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            sec_resp = await client.get(f"{plex_url}/library/sections", params={"X-Plex-Token": token}, headers=headers)
+            sec_resp.raise_for_status()
+            sections = sec_resp.json().get("MediaContainer", {}).get("Directory", [])
+
+            plex_posters = {}  # (title_lower, year) -> thumb path
+            for sec in sections:
+                key = sec.get("key")
+                all_resp = await client.get(f"{plex_url}/library/sections/{key}/all", params={"X-Plex-Token": token}, headers=headers)
+                if all_resp.status_code != 200:
+                    continue
+                for meta in all_resp.json().get("MediaContainer", {}).get("Metadata", []):
+                    t = meta.get("title", "").strip().lower()
+                    y = meta.get("year")
+                    thumb = meta.get("thumb")
+                    if t and thumb:
+                        plex_posters[(t, y)] = thumb
+                        plex_posters[(t, None)] = thumb
+
+            for item in db.query(MediaItem).all():
+                key_exact = (item.title.strip().lower(), item.year)
+                key_fallback = (item.title.strip().lower(), None)
+                thumb = plex_posters.get(key_exact) or plex_posters.get(key_fallback)
+                if thumb:
+                    full_url = f"{plex_url}{thumb}?X-Plex-Token={token}"
+                    if item.poster_url != full_url:
+                        item.poster_url = full_url
+                        updated += 1
+            db.commit()
+    except Exception:
+        pass
+    return updated
 
 async def send_to_qbittorrent(download_url: str, item_id: int, db: Session) -> str:
     cfg = get_settings(db)
@@ -283,5 +360,7 @@ async def check_downloads_and_import(db: Session):
             db.commit()
             imported_any = True
 
-    if imported_any and cfg.get("plex_notify_import", "true") == "true":
-        await trigger_plex_scan(cfg)
+    if imported_any:
+        if cfg.get("plex_notify_import", "true") == "true":
+            await trigger_plex_scan(cfg)
+        await sync_posters_from_plex(db)
