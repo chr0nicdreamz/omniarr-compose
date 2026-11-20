@@ -2,55 +2,91 @@
 <html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OmniArr — Unified Media Manager</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-screen p-8">
-    <div class="max-w-5xl mx-auto">
-        <header class="flex justify-between items-center mb-8 border-b border-slate-700 pb-4">
-            <h1 class="text-3xl font-bold text-indigo-400">OmniArr</h1>
-            <span class="text-sm text-slate-400">Movies • TV • Music</span>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+    <div class="max-w-6xl mx-auto p-4 md:p-8">
+        <!-- Top Header -->
+        <header class="flex flex-wrap justify-between items-center gap-4 mb-6 border-b border-slate-800 pb-4">
+            <div>
+                <h1 class="text-2xl md:text-3xl font-bold text-indigo-400 tracking-tight">OmniArr</h1>
+                <p class="text-xs text-slate-400">Unified Sonarr • Radarr • Lidarr • Prowlarr Engine</p>
+            </div>
+            <div class="flex items-center gap-2">
+                <form action="/scan-now" method="post">
+                    <button type="submit" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium text-indigo-300">
+                        ↻ Run Search & Import Now
+                    </button>
+                </form>
+            </div>
         </header>
 
-        <!-- Backup Importer -->
+        {% if msg %}
+        <div class="mb-5 bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 px-4 py-2.5 rounded-lg text-sm flex justify-between items-center">
+            <span>{{ msg }}</span>
+            <a href="/?tab={{ active_tab }}" class="text-xs underline">Dismiss</a>
+        </div>
+        {% endif %}
+
+        <!-- Servarr Navigation Tabs -->
+        <nav class="flex flex-wrap gap-1.5 mb-6 bg-slate-900 p-1.5 rounded-lg border border-slate-800 text-xs font-medium">
+            {% set tabs = [
+                ('library', 'Library'),
+                ('media', 'Media Management'),
+                ('profiles', 'Profiles'),
+                ('indexers', 'Indexers (' ~ indexers|length ~ ')'),
+                ('clients', 'Download Clients'),
+                ('connect', 'Connect & General')
+            ] %}
+            {% for key, label in tabs %}
+            <a href="/?tab={{ key }}"
+               class="px-3.5 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab == key else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
+                {{ label }}
+            </a>
+            {% endfor %}
+        </nav>
+
+        <!-- TAB 1: LIBRARY -->
+        {% if active_tab == 'library' %}
         <form action="/import-backup" method="post" enctype="multipart/form-data"
-              class="bg-slate-800/60 border border-slate-700 p-3 rounded-lg mb-6 flex flex-wrap items-center justify-between gap-3">
+              class="bg-slate-900 border border-slate-800 p-3.5 rounded-lg mb-6 flex flex-wrap items-center justify-between gap-3">
             <div class="text-xs text-slate-300">
                 <span class="font-semibold text-indigo-400">Migrate from *Arr:</span>
-                Upload a backup <code>.zip</code> from Sonarr, Radarr, Lidarr, or Prowlarr
+                Upload a backup <code class="text-slate-200">.zip</code> from Sonarr, Radarr, Lidarr, or Prowlarr
             </div>
             <div class="flex items-center gap-2">
                 <input type="file" name="backup_file" accept=".zip" required
-                       class="text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600">
-                <button type="submit" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-xs font-medium">
+                       class="text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700">
+                <button type="submit" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium">
                     Import Backup
                 </button>
             </div>
         </form>
 
-        <!-- Add Media Form -->
-        <form action="/add" method="post" class="bg-slate-800 p-4 rounded-lg mb-8 flex flex-wrap gap-3 items-end">
+        <form action="/add" method="post" class="bg-slate-900 border border-slate-800 p-4 rounded-lg mb-6 flex flex-wrap gap-3 items-end">
             <div class="flex-1 min-w-[200px]">
                 <label class="block text-xs text-slate-400 mb-1">Title / Artist - Album</label>
                 <input type="text" name="title" required placeholder="e.g. Dune Part Two"
-                       class="w-full bg-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                       class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
             </div>
             <div class="w-24">
                 <label class="block text-xs text-slate-400 mb-1">Year</label>
                 <input type="number" name="year" placeholder="2024"
-                       class="w-full bg-slate-700 rounded px-3 py-2 text-sm">
+                       class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
             </div>
             <div class="w-32">
                 <label class="block text-xs text-slate-400 mb-1">Type</label>
-                <select name="media_type" class="w-full bg-slate-700 rounded px-3 py-2 text-sm">
+                <select name="media_type" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
                     <option value="movie">Movie</option>
                     <option value="tv">TV Show</option>
                     <option value="music">Music</option>
                 </select>
             </div>
-            <div class="w-32">
+            <div class="w-36">
                 <label class="block text-xs text-slate-400 mb-1">Quality</label>
-                <select name="quality_profile" class="w-full bg-slate-700 rounded px-3 py-2 text-sm">
+                <select name="quality_profile" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
                     <option value="1080p">1080p</option>
                     <option value="2160p">2160p (4K)</option>
                     <option value="720p">720p</option>
@@ -63,10 +99,9 @@
             </button>
         </form>
 
-        <!-- Library Table -->
-        <div class="bg-slate-800 rounded-lg overflow-hidden">
+        <div class="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
             <table class="w-full text-left text-sm">
-                <thead class="bg-slate-700/50 text-slate-300 uppercase text-xs">
+                <thead class="bg-slate-800/70 text-slate-300 uppercase text-xs">
                     <tr>
                         <th class="px-4 py-3">Title</th>
                         <th class="px-4 py-3">Type</th>
@@ -75,11 +110,12 @@
                         <th class="px-4 py-3 text-right">Actions</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-700">
+                <tbody class="divide-y divide-slate-800">
                     {% for item in items %}
-                    <tr>
+                    <tr class="hover:bg-slate-800/40">
                         <td class="px-4 py-3 font-medium">
                             {{ item.title }} {% if item.year %}<span class="text-slate-400">({{ item.year }})</span>{% endif %}
+                            {% if item.file_path %}<div class="text-[11px] text-slate-500 truncate max-w-md">{{ item.file_path }}</div>{% endif %}
                         </td>
                         <td class="px-4 py-3 uppercase text-xs text-slate-400">{{ item.media_type }}</td>
                         <td class="px-4 py-3">{{ item.quality_profile }}</td>
@@ -89,7 +125,7 @@
                             {% elif item.status == 'downloading' %}
                                 <span class="bg-amber-500/20 text-amber-300 px-2 py-1 rounded text-xs">Downloading</span>
                             {% else %}
-                                <span class="bg-slate-600/40 text-slate-300 px-2 py-1 rounded text-xs">Wanted</span>
+                                <span class="bg-slate-700/50 text-slate-300 px-2 py-1 rounded text-xs">Wanted</span>
                             {% endif %}
                         </td>
                         <td class="px-4 py-3 text-right">
@@ -102,6 +138,313 @@
                 </tbody>
             </table>
         </div>
+        {% endif %}
+
+        <!-- TAB 2: MEDIA MANAGEMENT -->
+        {% if active_tab == 'media' %}
+        <div class="grid md:grid-cols-2 gap-6">
+            <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
+                <input type="hidden" name="section" value="media">
+                <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">Importing & Naming</h2>
+
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">File Transfer Mode</label>
+                    <select name="import_mode" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                        <option value="hardlink" {{ 'selected' if cfg.import_mode == 'hardlink' }}>Hardlink (Fallback to Copy across drives)</option>
+                        <option value="copy" {{ 'selected' if cfg.import_mode == 'copy' }}>Copy (Keep seed intact on plex_e)</option>
+                        <option value="move" {{ 'selected' if cfg.import_mode == 'move' }}>Move (Remove source after transfer)</option>
+                    </select>
+                </div>
+
+                <label class="flex items-center gap-2.5 text-sm text-slate-300 pt-1">
+                    <input type="checkbox" name="remove_completed_download" value="true" {{ 'checked' if cfg.remove_completed_download == 'true' }}
+                           class="rounded bg-slate-800 border-slate-700 text-indigo-500">
+                    <span>Completed Download Handling: Remove torrent & data from qBittorrent after import</span>
+                </label>
+
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Minimum Free Space per Drive (GB)</label>
+                    <input type="number" name="min_free_space_gb" value="{{ cfg.min_free_space_gb }}"
+                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                </div>
+
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Movie Folder Format</label>
+                    <input type="text" name="movie_folder_format" value="{{ cfg.movie_folder_format }}"
+                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                </div>
+
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">TV Show Folder Format</label>
+                    <input type="text" name="tv_folder_format" value="{{ cfg.tv_folder_format }}"
+                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                </div>
+
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">
+                    Save Media Settings
+                </button>
+            </form>
+
+            <!-- Live JBOD Drive Pool Status -->
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-3">
+                <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">Bound Plex Drive Pool</h2>
+                <p class="text-xs text-slate-400">OmniArr automatically routes new imports to the drive with the most available space.</p>
+                <div class="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
+                    {% for d in drives %}
+                    <div class="bg-slate-800/60 p-2.5 rounded border border-slate-800">
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="font-mono text-slate-200">{{ d.mount }}</span>
+                            <span class="text-slate-400">{{ d.free_gb }} GB free / {{ d.total_gb }} GB</span>
+                        </div>
+                        <div class="w-full bg-slate-700 h-1.5 rounded-full overflow-hidden">
+                            <div class="bg-indigo-500 h-full" style="width: {{ d.used_pct }}%"></div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- TAB 3: PROFILES & CUSTOM FORMATS -->
+        {% if active_tab == 'profiles' %}
+        <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4 max-w-3xl">
+            <input type="hidden" name="section" value="profiles">
+            <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">Quality Profiles & Custom Formats</h2>
+
+            <div class="grid sm:grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Default Movie Quality</label>
+                    <select name="default_movie_quality" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                        {% for q in ['2160p', '1080p', '720p', 'any'] %}
+                        <option value="{{ q }}" {{ 'selected' if cfg.default_movie_quality == q }}>{{ q }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Default TV Quality</label>
+                    <select name="default_tv_quality" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                        {% for q in ['2160p', '1080p', '720p', 'any'] %}
+                        <option value="{{ q }}" {{ 'selected' if cfg.default_tv_quality == q }}>{{ q }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Default Music Quality</label>
+                    <select name="default_music_quality" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                        {% for q in ['lossless', 'any'] %}
+                        <option value="{{ q }}" {{ 'selected' if cfg.default_music_quality == q }}>{{ q }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Minimum Seeders Required</label>
+                    <input type="number" name="min_seeders" value="{{ cfg.min_seeders }}"
+                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Maximum Release Size (GB)</label>
+                    <input type="number" step="0.5" name="max_size_gb" value="{{ cfg.max_size_gb }}"
+                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs text-slate-400 mb-1">Preferred Release Keywords (+50 Custom Format Score each, comma-separated)</label>
+                <input type="text" name="preferred_keywords" value="{{ cfg.preferred_keywords }}"
+                       class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+            </div>
+
+            <div>
+                <label class="block text-xs text-slate-400 mb-1">Must Not Contain / Blocked Terms (comma-separated)</label>
+                <input type="text" name="blocked_keywords" value="{{ cfg.blocked_keywords }}"
+                       class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono text-rose-300">
+            </div>
+
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">
+                Save Profiles
+            </button>
+        </form>
+        {% endif %}
+
+        <!-- TAB 4: INDEXERS -->
+        {% if active_tab == 'indexers' %}
+        <div class="space-y-6 max-w-4xl">
+            <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
+                <input type="hidden" name="section" value="indexers">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+                    <h2 class="text-lg font-semibold text-indigo-300">Prowlarr Connection</h2>
+                    <button type="button" onclick="testConn('prowlarr')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">
+                        Test Prowlarr
+                    </button>
+                </div>
+                <div id="test-prowlarr" class="text-xs text-slate-400"></div>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Prowlarr URL</label>
+                        <input type="text" name="prowlarr_url" value="{{ cfg.prowlarr_url }}"
+                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Prowlarr API Key</label>
+                        <input type="text" name="prowlarr_api_key" value="{{ cfg.prowlarr_api_key }}"
+                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                </div>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">
+                    Save Prowlarr Config
+                </button>
+            </form>
+
+            <form action="/settings/indexers" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
+                <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">Imported Indexers</h2>
+                <div class="grid sm:grid-cols-2 gap-3">
+                    {% for idx in indexers %}
+                    <div class="flex items-center justify-between bg-slate-800/60 border border-slate-800 px-3 py-2 rounded">
+                        <label class="flex items-center gap-2.5 text-sm">
+                            <input type="checkbox" name="enabled_{{ idx.id }}" value="1" {{ 'checked' if idx.enabled }}
+                                   class="rounded bg-slate-700 border-slate-600 text-indigo-500">
+                            <span>{{ idx.name }}</span>
+                            <span class="text-[11px] text-slate-500">({{ idx.implementation }})</span>
+                        </label>
+                        <input type="number" name="priority_{{ idx.id }}" value="{{ idx.priority }}" title="Priority"
+                               class="w-16 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-center">
+                    </div>
+                    {% endfor %}
+                </div>
+                {% if indexers %}
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">
+                    Save Indexer States
+                </button>
+                {% else %}
+                <p class="text-xs text-slate-400">No indexers imported yet. Upload your Prowlarr backup .zip on the Library tab.</p>
+                {% endif %}
+            </form>
+        </div>
+        {% endif %}
+
+        <!-- TAB 5: DOWNLOAD CLIENTS -->
+        {% if active_tab == 'clients' %}
+        <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4 max-w-3xl">
+            <input type="hidden" name="section" value="clients">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+                <h2 class="text-lg font-semibold text-indigo-300">qBittorrent & Remote Path Mappings</h2>
+                <button type="button" onclick="testConn('qbittorrent')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">
+                    Test qBittorrent
+                </button>
+            </div>
+            <div id="test-qbittorrent" class="text-xs text-slate-400"></div>
+
+            <div class="grid sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">qBittorrent URL</label>
+                    <input type="text" name="qbit_url" value="{{ cfg.qbit_url }}"
+                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Category</label>
+                    <input type="text" name="qbit_category" value="{{ cfg.qbit_category }}"
+                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Username</label>
+                    <input type="text" name="qbit_user" value="{{ cfg.qbit_user }}"
+                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Password</label>
+                    <input type="password" name="qbit_pass" value="{{ cfg.qbit_pass }}"
+                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                </div>
+            </div>
+
+            <div class="border-t border-slate-800 pt-4">
+                <h3 class="text-sm font-semibold text-slate-300 mb-3">Remote Path Mapping</h3>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Remote Path (Windows / UNC Marker)</label>
+                        <input type="text" name="qbit_remote_path" value="{{ cfg.qbit_remote_path }}"
+                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Local Path (LXC Mount)</label>
+                        <input type="text" name="qbit_local_mount" value="{{ cfg.qbit_local_mount }}"
+                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">
+                Save Download Client
+            </button>
+        </form>
+        {% endif %}
+
+        <!-- TAB 6: CONNECT & GENERAL -->
+        {% if active_tab == 'connect' %}
+        <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-5 max-w-3xl">
+            <input type="hidden" name="section" value="connect">
+            <div>
+                <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
+                    <h2 class="text-lg font-semibold text-indigo-300">Plex Media Server Connection</h2>
+                    <button type="button" onclick="testConn('plex')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">
+                        Test Plex
+                    </button>
+                </div>
+                <div id="test-plex" class="text-xs text-slate-400 mb-2"></div>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Plex URL</label>
+                        <input type="text" name="plex_url" value="{{ cfg.plex_url }}"
+                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">X-Plex-Token</label>
+                        <input type="text" name="plex_token" value="{{ cfg.plex_token }}"
+                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                </div>
+                <div class="flex gap-6 mt-3 text-sm text-slate-300">
+                    <label class="flex items-center gap-2">
+                        <input type="checkbox" name="plex_notify_grab" value="true" {{ 'checked' if cfg.plex_notify_grab == 'true' }}>
+                        <span>On Grab</span>
+                    </label>
+                    <label class="flex items-center gap-2">
+                        <input type="checkbox" name="plex_notify_import" value="true" {{ 'checked' if cfg.plex_notify_import == 'true' }}>
+                        <span>On Import / Upgrade</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="border-t border-slate-800 pt-4">
+                <h2 class="text-lg font-semibold text-indigo-300 mb-3">General & Seerr API Security</h2>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">OmniArr API Key (Use this in Seerr)</label>
+                    <input type="text" name="omniarr_api_key" value="{{ cfg.omniarr_api_key }}"
+                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                </div>
+            </div>
+
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">
+                Save General & Connect Settings
+            </button>
+        </form>
+        {% endif %}
     </div>
+
+    <script>
+        async function testConn(service) {
+            const el = document.getElementById('test-' + service);
+            el.textContent = 'Testing connection...';
+            el.className = 'text-xs text-amber-300';
+            const res = await fetch('/settings/test/' + service, { method: 'POST' });
+            const data = await res.json();
+            el.textContent = data.detail;
+            el.className = data.ok ? 'text-xs text-emerald-400 font-medium' : 'text-xs text-rose-400 font-medium';
+        }
+    </script>
 </body>
 </html>
