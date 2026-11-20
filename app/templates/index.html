@@ -745,7 +745,7 @@
                                     title="Show / Hide API Key"
                                     class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs">👁</button>
                         </div>
-                        <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('omniarr-api-key-input').value); this.textContent='✓ Copied'; setTimeout(()=>this.textContent='📋 Copy', 1500);"
+                        <button type="button" onclick="const el=document.getElementById('omniarr-api-key-input'); const orig=el.type; el.type='text'; el.select(); document.execCommand('copy'); el.type=orig; window.getSelection().removeAllRanges(); this.textContent='✓ Copied'; setTimeout(()=>this.textContent='📋 Copy', 1500);"
                                 class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2 rounded text-xs font-medium text-slate-200 whitespace-nowrap">📋 Copy</button>
                         <button type="submit" formaction="/api/settings/rotate-key" formmethod="post"
                                 onclick="return confirm('Generate a brand-new OmniArr API Key? Any connected apps like Seerr will need the updated key.');"

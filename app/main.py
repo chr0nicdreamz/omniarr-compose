@@ -33,7 +33,8 @@ async def scheduled_tasks():
             releases = await search_prowlarr(query, item.media_type, item.quality_profile, db)
             if releases:
                 best = releases[0]
-                t_hash = await send_to_qbittorrent(best["downloadUrl"], item.id, db)
+                dl_link = best.get("downloadUrl") or best.get("magnetUrl") or best.get("guid")
+                t_hash = await send_to_qbittorrent(dl_link, item.id, db) if dl_link else None
                 if t_hash:
                     item.torrent_hash = t_hash
                     item.status = "downloading"
@@ -408,6 +409,7 @@ async def run_scan_now():
 def arr_system_status():
     return {"version": "4.0.0.0", "appName": "OmniArr"}
 
+@app.get("/api/v3/qualityProfile", dependencies=[Depends(verify_api_key)])
 @app.get("/api/v3/qualityprofile", dependencies=[Depends(verify_api_key)])
 def arr_quality_profiles(db: Session = Depends(get_db)):
     imported = db.query(QualityProfile).all()
@@ -420,6 +422,7 @@ def arr_quality_profiles(db: Session = Depends(get_db)):
         {"id": 4, "name": "Any"},
     ]
 
+@app.get("/api/v3/rootFolder", dependencies=[Depends(verify_api_key)])
 @app.get("/api/v3/rootfolder", dependencies=[Depends(verify_api_key)])
 def arr_root_folders(db: Session = Depends(get_db)):
     roots_map = get_media_roots(db)
@@ -431,6 +434,15 @@ def arr_root_folders(db: Session = Depends(get_db)):
             out.append({"id": idx, "path": str(p), "accessible": p.exists(), "freeSpace": free_space})
             idx += 1
     return out
+
+@app.get("/api/v3/tag", dependencies=[Depends(verify_api_key)])
+def v3_tags():
+    return []
+
+@app.get("/api/v3/languageProfile", dependencies=[Depends(verify_api_key)])
+@app.get("/api/v3/languageprofile", dependencies=[Depends(verify_api_key)])
+def v3_language_profiles():
+    return [{"id": 1, "name": "English", "upgradeAllowed": True, "cutoff": {"id": 1, "name": "English"}, "languages": []}]
 
 @app.get("/api/v3/movie", dependencies=[Depends(verify_api_key)])
 def seerr_get_movies(tmdbId: int = None, db: Session = Depends(get_db)):
