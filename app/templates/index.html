@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
-    <div class="max-w-6xl mx-auto p-4 md:p-8">
+    <div class="max-w-7xl mx-auto p-4 md:p-8">
         <!-- Top Header -->
         <header class="flex flex-wrap justify-between items-center gap-4 mb-6 border-b border-slate-800 pb-4">
             <div>
@@ -31,14 +31,18 @@
         {% if msg %}
         <div class="mb-5 bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 px-4 py-2.5 rounded-lg text-sm flex justify-between items-center">
             <span>{{ msg }}</span>
-            <a href="/?tab={{ active_tab }}" class="text-xs underline">Dismiss</a>
+            <a href="/?tab={{ active_tab }}&sort={{ sort }}" class="text-xs underline">Dismiss</a>
         </div>
         {% endif %}
 
-        <!-- Servarr Navigation Tabs -->
+        {% set movie_items = items | selectattr('media_type', 'equalto', 'movie') | list %}
+        {% set tv_items = items | selectattr('media_type', 'equalto', 'tv') | list %}
+        {% set music_items = items | selectattr('media_type', 'equalto', 'music') | list %}
+
+        <!-- Navigation Tabs -->
         <nav class="flex flex-wrap gap-1.5 mb-6 bg-slate-900 p-1.5 rounded-lg border border-slate-800 text-xs font-medium">
             {% set tabs = [
-                ('library', 'Library (' ~ items|length ~ ')'),
+                ('library', 'Library (Movies: ' ~ movie_items|length ~ ' • TV: ' ~ tv_items|length ~ ')'),
                 ('media', 'Media Management'),
                 ('profiles', 'Profiles & Custom Formats'),
                 ('indexers', 'Indexers (' ~ indexers|length ~ ')'),
@@ -46,17 +50,132 @@
                 ('connect', 'Connect & General')
             ] %}
             {% for key, label in tabs %}
-            <a href="/?tab={{ key }}"
+            <a href="/?tab={{ key }}&sort={{ sort }}"
                class="px-3.5 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab == key else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
                 {{ label }}
             </a>
             {% endfor %}
         </nav>
 
-        <!-- TAB 1: LIBRARY -->
+        <!-- MEDIA ITEM MACRO (Supports both Tile Grid & List View) -->
+        {% macro render_card(item) %}
+        {% set eps = episodes_by_media.get(item.id, []) %}
+        <div class="media-card bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-slate-700 transition flex flex-col">
+            <div class="card-inner flex flex-col h-full">
+                <!-- Poster Container (Large 2:3 in Grid, 24x36 in List) -->
+                <div class="poster-box relative w-full aspect-[2/3] bg-slate-800 overflow-hidden flex-shrink-0">
+                    {% if item.poster_url %}
+                    <img src="{{ item.poster_url }}" alt="{{ item.title }}" class="w-full h-full object-cover" loading="lazy">
+                    {% else %}
+                    <div class="w-full h-full flex flex-col items-center justify-center p-3 text-center bg-gradient-to-br from-slate-800 to-slate-900">
+                        <span class="text-xs uppercase tracking-wider text-slate-500 font-bold">{{ item.media_type }}</span>
+                        <span class="text-xs text-slate-400 mt-1 line-clamp-2">{{ item.title }}</span>
+                    </div>
+                    {% endif %}
+
+                    <!-- Status Pill Overlay (Grid Mode) -->
+                    <div class="grid-badge absolute top-2 right-2">
+                        {% if item.status == 'available' %}
+                            <span class="bg-emerald-600/90 backdrop-blur-sm text-white px-2 py-0.5 rounded text-[11px] font-semibold shadow">Available</span>
+                        {% elif item.status == 'downloading' %}
+                            <span class="bg-amber-500/90 backdrop-blur-sm text-slate-950 px-2 py-0.5 rounded text-[11px] font-semibold shadow">Downloading</span>
+                        {% else %}
+                            <span class="bg-rose-600/90 backdrop-blur-sm text-white px-2 py-0.5 rounded text-[11px] font-semibold shadow">Wanted</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Card Details & Action Controls -->
+                <div class="card-body p-3.5 flex-1 flex flex-col justify-between min-w-0">
+                    <div>
+                        <div class="flex items-start justify-between gap-2">
+                            <h4 class="font-semibold text-sm sm:text-base text-slate-100 leading-snug">
+                                {{ item.title }} {% if item.year %}<span class="text-slate-400 font-normal">({{ item.year }})</span>{% endif %}
+                            </h4>
+                            <!-- Status Pill (List Mode) -->
+                            <div class="list-badge hidden flex-shrink-0">
+                                {% if item.status == 'available' %}
+                                    <span class="bg-emerald-500/20 text-emerald-300 px-2.5 py-0.5 rounded text-xs font-medium">Available</span>
+                                {% elif item.status == 'downloading' %}
+                                    <span class="bg-amber-500/20 text-amber-300 px-2.5 py-0.5 rounded text-xs font-medium">Downloading</span>
+                                {% else %}
+                                    <span class="bg-rose-500/15 text-rose-300 border border-rose-500/30 px-2.5 py-0.5 rounded text-xs font-medium">Wanted</span>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap items-center gap-1.5 mt-2">
+                            <span class="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 text-[11px] border border-indigo-500/30 font-medium">
+                                {{ item.quality_profile }}
+                            </span>
+                            {% if item.added_at %}
+                            <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 text-[11px] border border-slate-700">
+                                {{ 'Added' if item.status == 'available' else 'Requested' }}: {{ item.added_at.strftime('%Y-%m-%d') }}
+                            </span>
+                            {% endif %}
+                        </div>
+
+                        {% if item.file_path %}
+                        <p class="list-path hidden text-xs text-slate-500 truncate mt-1.5 font-mono">{{ item.file_path }}</p>
+                        {% endif %}
+
+                        {% if eps %}
+                        <button type="button" onclick="toggleEpisodes('eps-{{ item.id }}')"
+                                class="mt-2 inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 font-medium">
+                            <span>▾ {{ eps|length }} Grabbed Ep{{ 's' if eps|length != 1 }}</span>
+                        </button>
+                        {% endif %}
+                    </div>
+
+                    <!-- Action Buttons: Search/Upgrade + Remove -->
+                    <div class="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                        <form action="/search/{{ item.id }}" method="post">
+                            <button type="submit" title="Search Prowlarr for a new or upgraded release"
+                                    class="bg-slate-800 hover:bg-indigo-600 text-slate-200 hover:text-white border border-slate-700 hover:border-indigo-500 px-2.5 py-1 rounded text-xs font-medium transition">
+                                🔍 {{ 'Upgrade' if item.status == 'available' else 'Search' }}
+                            </button>
+                        </form>
+                        <form action="/delete/{{ item.id }}" method="post">
+                            <button type="submit" class="text-rose-400 hover:text-rose-300 text-xs px-1.5 py-1">
+                                Remove
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Expandable Grabbed Episodes Drawer -->
+            {% if eps %}
+            <div id="eps-{{ item.id }}" class="hidden px-3.5 pb-3.5 pt-2 border-t border-slate-800 bg-slate-950/60 max-h-56 overflow-y-auto">
+                <table class="w-full text-left text-xs">
+                    <thead class="text-slate-400 uppercase bg-slate-800/50">
+                        <tr>
+                            <th class="px-2 py-1">Ep</th>
+                            <th class="px-2 py-1">Title</th>
+                            <th class="px-2 py-1">Release</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-800/70">
+                        {% for ep in eps %}
+                        <tr>
+                            <td class="px-2 py-1 font-mono text-indigo-300 whitespace-nowrap">
+                                S{{ "%02d"|format(ep.season_number) }}E{{ "%02d"|format(ep.episode_number) }}
+                            </td>
+                            <td class="px-2 py-1 text-slate-200">{{ ep.title }}</td>
+                            <td class="px-2 py-1 text-slate-400 font-mono truncate max-w-[160px]">{{ ep.quality or ep.file_path }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+        {% endmacro %}
+
+        <!-- TAB 1: SPLIT LIBRARY -->
         {% if active_tab == 'library' %}
         <form action="/import-backup" method="post" enctype="multipart/form-data"
-              class="bg-slate-900 border border-slate-800 p-3.5 rounded-lg mb-6 flex flex-wrap items-center justify-between gap-3">
+              class="bg-slate-900 border border-slate-800 p-3.5 rounded-lg mb-5 flex flex-wrap items-center justify-between gap-3">
             <div class="text-xs text-slate-300">
                 <span class="font-semibold text-indigo-400">Migrate from *Arr:</span>
                 Upload a backup <code class="text-slate-200">.zip</code> from Sonarr, Radarr, Lidarr, or Prowlarr
@@ -107,89 +226,116 @@
             </button>
         </form>
 
-        <div class="space-y-3">
-            {% for item in items %}
-            {% set eps = episodes_by_media.get(item.id, []) %}
-            <div class="bg-slate-900 border border-slate-800 rounded-lg p-3.5 hover:border-slate-700 transition">
-                <div class="flex items-center gap-4">
-                    <!-- Boxart / Poster -->
-                    <div class="w-12 h-18 sm:w-14 sm:h-20 flex-shrink-0 bg-slate-800 rounded overflow-hidden border border-slate-700 flex items-center justify-center">
-                        {% if item.poster_url %}
-                        <img src="{{ item.poster_url }}" alt="{{ item.title }}" class="w-full h-full object-cover" loading="lazy">
-                        {% else %}
-                        <span class="text-[10px] uppercase text-slate-500 font-bold text-center px-1">{{ item.media_type }}</span>
-                        {% endif %}
-                    </div>
+        <!-- Library Controls Toolbar: Media Filter + Sort + Tile/List View Toggle -->
+        <div class="bg-slate-900 border border-slate-800 p-3 rounded-lg mb-6 flex flex-wrap items-center justify-between gap-3">
+            <!-- Media Filter Buttons -->
+            <div class="flex flex-wrap items-center gap-1.5">
+                <button type="button" onclick="filterLibrary('all')" id="btn-lib-all"
+                        class="lib-filter-btn bg-indigo-600 text-white px-3 py-1.5 rounded text-xs font-semibold">
+                    All ({{ items|length }})
+                </button>
+                <button type="button" onclick="filterLibrary('movies')" id="btn-lib-movies"
+                        class="lib-filter-btn bg-slate-800 text-slate-300 hover:bg-slate-700 px-3 py-1.5 rounded text-xs font-semibold">
+                    🎬 Movies ({{ movie_items|length }})
+                </button>
+                <button type="button" onclick="filterLibrary('tv')" id="btn-lib-tv"
+                        class="lib-filter-btn bg-slate-800 text-slate-300 hover:bg-slate-700 px-3 py-1.5 rounded text-xs font-semibold">
+                    📺 TV Shows ({{ tv_items|length }})
+                </button>
+            </div>
 
-                    <!-- Title & Metadata -->
-                    <div class="flex-1 min-w-0">
-                        <div class="flex flex-wrap items-center gap-2">
-                            <h3 class="font-semibold text-base text-slate-100 truncate">
-                                {{ item.title }} {% if item.year %}<span class="text-slate-400 font-normal">({{ item.year }})</span>{% endif %}
-                            </h3>
-                            <span class="px-2 py-0.5 rounded bg-slate-800 text-[10px] uppercase text-slate-400 border border-slate-700">
-                                {{ item.media_type }}
-                            </span>
-                            <span class="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 text-[11px] border border-indigo-500/30">
-                                {{ item.quality_profile }}
-                            </span>
-                        </div>
-                        {% if item.file_path %}
-                        <p class="text-xs text-slate-500 truncate mt-1 font-mono">{{ item.file_path }}</p>
-                        {% endif %}
+            <!-- Sort Dropdown + Layout Switcher -->
+            <div class="flex flex-wrap items-center gap-2">
+                <form method="get" action="/" class="flex items-center gap-1.5">
+                    <input type="hidden" name="tab" value="library">
+                    <label class="text-xs text-slate-400">Sort:</label>
+                    <select name="sort" onchange="this.form.submit()"
+                            class="bg-slate-800 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200">
+                        <option value="added_desc" {{ 'selected' if sort == 'added_desc' }}>Date Added / Requested (Newest)</option>
+                        <option value="added_asc" {{ 'selected' if sort == 'added_asc' }}>Date Added / Requested (Oldest)</option>
+                        <option value="title_asc" {{ 'selected' if sort == 'title_asc' }}>Title (A → Z)</option>
+                        <option value="title_desc" {{ 'selected' if sort == 'title_desc' }}>Title (Z → A)</option>
+                    </select>
+                </form>
 
-                        {% if eps %}
-                        <button type="button" onclick="toggleEpisodes('eps-{{ item.id }}')"
-                                class="mt-2 inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-medium">
-                            <span>▾ View {{ eps|length }} Grabbed Episode{{ 's' if eps|length != 1 }}</span>
-                        </button>
-                        {% endif %}
-                    </div>
-
-                    <!-- Status & Actions -->
-                    <div class="flex items-center gap-3">
-                        {% if item.status == 'available' %}
-                            <span class="bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded text-xs font-medium">Available</span>
-                        {% elif item.status == 'downloading' %}
-                            <span class="bg-amber-500/20 text-amber-300 px-2.5 py-1 rounded text-xs font-medium">Downloading</span>
-                        {% else %}
-                            <span class="bg-slate-800 text-slate-300 px-2.5 py-1 rounded text-xs">Wanted</span>
-                        {% endif %}
-
-                        <form action="/delete/{{ item.id }}" method="post">
-                            <button type="submit" class="text-rose-400 hover:text-rose-300 text-xs">Remove</button>
-                        </form>
-                    </div>
+                <div class="flex bg-slate-800 rounded p-0.5 border border-slate-700 text-xs">
+                    <button type="button" onclick="setLayout('grid')" id="btn-view-grid"
+                            class="px-2.5 py-1 rounded bg-indigo-600 text-white font-medium">
+                        ⊞ Tiles
+                    </button>
+                    <button type="button" onclick="setLayout('list')" id="btn-view-list"
+                            class="px-2.5 py-1 rounded text-slate-300 hover:text-white font-medium">
+                        ☰ List
+                    </button>
                 </div>
+            </div>
+        </div>
 
-                <!-- Expandable Grabbed Episodes Drawer -->
-                {% if eps %}
-                <div id="eps-{{ item.id }}" class="hidden mt-3 pt-3 border-t border-slate-800 max-h-64 overflow-y-auto">
-                    <table class="w-full text-left text-xs">
-                        <thead class="text-slate-400 uppercase bg-slate-800/50">
-                            <tr>
-                                <th class="px-3 py-1.5">Episode</th>
-                                <th class="px-3 py-1.5">Title</th>
-                                <th class="px-3 py-1.5">Grabbed Release / File</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-800/70">
-                            {% for ep in eps %}
-                            <tr>
-                                <td class="px-3 py-1.5 font-mono text-indigo-300 whitespace-nowrap">
-                                    S{{ "%02d"|format(ep.season_number) }}E{{ "%02d"|format(ep.episode_number) }}
-                                </td>
-                                <td class="px-3 py-1.5 text-slate-200">{{ ep.title }}</td>
-                                <td class="px-3 py-1.5 text-slate-400 font-mono truncate max-w-xs">{{ ep.quality or ep.file_path }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+        <!-- MOVIES SECTION -->
+        {% set movies_available = movie_items | selectattr('status', 'equalto', 'available') | list %}
+        {% set movies_wanted = movie_items | rejectattr('status', 'equalto', 'available') | list %}
+
+        <section id="section-movies" class="mb-10 space-y-6">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                <h2 class="text-xl font-bold text-indigo-300">🎬 Movies</h2>
+                <span class="text-xs text-slate-400">{{ movies_available|length }} Available • {{ movies_wanted|length }} Wanted</span>
+            </div>
+
+            <div>
+                <h3 class="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-3">✓ Currently Available ({{ movies_available|length }})</h3>
+                {% if movies_available %}
+                <div class="media-container grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                    {% for item in movies_available %}{{ render_card(item) }}{% endfor %}
                 </div>
+                {% else %}
+                <p class="text-xs text-slate-500 bg-slate-900/50 border border-slate-800 rounded-lg p-3">No movies currently on disk.</p>
                 {% endif %}
             </div>
-            {% endfor %}
-        </div>
+
+            <div>
+                <h3 class="text-xs font-bold uppercase tracking-wider text-amber-400 mb-3">⏳ Currently Wanted & Downloading ({{ movies_wanted|length }})</h3>
+                {% if movies_wanted %}
+                <div class="media-container grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                    {% for item in movies_wanted %}{{ render_card(item) }}{% endfor %}
+                </div>
+                {% else %}
+                <p class="text-xs text-slate-500 bg-slate-900/50 border border-slate-800 rounded-lg p-3">No wanted movies right now.</p>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- TV SHOWS SECTION -->
+        {% set tv_available = tv_items | selectattr('status', 'equalto', 'available') | list %}
+        {% set tv_wanted = tv_items | rejectattr('status', 'equalto', 'available') | list %}
+
+        <section id="section-tv" class="mb-10 space-y-6">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                <h2 class="text-xl font-bold text-indigo-300">📺 TV Shows</h2>
+                <span class="text-xs text-slate-400">{{ tv_available|length }} With Grabbed Episodes • {{ tv_wanted|length }} Wanted</span>
+            </div>
+
+            <div>
+                <h3 class="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-3">✓ Currently Available / Episodes Grabbed ({{ tv_available|length }})</h3>
+                {% if tv_available %}
+                <div class="media-container grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                    {% for item in tv_available %}{{ render_card(item) }}{% endfor %}
+                </div>
+                {% else %}
+                <p class="text-xs text-slate-500 bg-slate-900/50 border border-slate-800 rounded-lg p-3">No TV shows with grabbed episodes yet.</p>
+                {% endif %}
+            </div>
+
+            <div>
+                <h3 class="text-xs font-bold uppercase tracking-wider text-amber-400 mb-3">⏳ Currently Wanted & Downloading ({{ tv_wanted|length }})</h3>
+                {% if tv_wanted %}
+                <div class="media-container grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                    {% for item in tv_wanted %}{{ render_card(item) }}{% endfor %}
+                </div>
+                {% else %}
+                <p class="text-xs text-slate-500 bg-slate-900/50 border border-slate-800 rounded-lg p-3">No wanted TV shows right now.</p>
+                {% endif %}
+            </div>
+        </section>
         {% endif %}
 
         <!-- TAB 2: MEDIA MANAGEMENT -->
@@ -198,7 +344,6 @@
             <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
                 <input type="hidden" name="section" value="media">
                 <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">Importing & Naming</h2>
-
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">File Transfer Mode</label>
                     <select name="import_mode" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
@@ -207,39 +352,27 @@
                         <option value="move" {{ 'selected' if cfg.import_mode == 'move' }}>Move (Remove source after transfer)</option>
                     </select>
                 </div>
-
                 <label class="flex items-center gap-2.5 text-sm text-slate-300 pt-1">
-                    <input type="checkbox" name="remove_completed_download" value="true" {{ 'checked' if cfg.remove_completed_download == 'true' }}
-                           class="rounded bg-slate-800 border-slate-700 text-indigo-500">
+                    <input type="checkbox" name="remove_completed_download" value="true" {{ 'checked' if cfg.remove_completed_download == 'true' }}>
                     <span>Completed Download Handling: Remove torrent & data from qBittorrent after import</span>
                 </label>
-
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">Minimum Free Space per Drive (GB)</label>
-                    <input type="number" name="min_free_space_gb" value="{{ cfg.min_free_space_gb }}"
-                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                    <input type="number" name="min_free_space_gb" value="{{ cfg.min_free_space_gb }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
                 </div>
-
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">Movie Folder Format</label>
-                    <input type="text" name="movie_folder_format" value="{{ cfg.movie_folder_format }}"
-                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    <input type="text" name="movie_folder_format" value="{{ cfg.movie_folder_format }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
                 </div>
-
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">TV Show Folder Format</label>
-                    <input type="text" name="tv_folder_format" value="{{ cfg.tv_folder_format }}"
-                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    <input type="text" name="tv_folder_format" value="{{ cfg.tv_folder_format }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
                 </div>
-
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">
-                    Save Media Settings
-                </button>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save Media Settings</button>
             </form>
 
             <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-3">
                 <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">Bound Plex Drive Pool</h2>
-                <p class="text-xs text-slate-400">OmniArr automatically routes new imports to the drive with the most available space.</p>
                 <div class="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
                     {% for d in drives %}
                     <div class="bg-slate-800/60 p-2.5 rounded border border-slate-800">
@@ -263,106 +396,75 @@
             <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
                 <input type="hidden" name="section" value="profiles">
                 <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">Quality Defaults & Release Filters</h2>
-
                 <div class="grid sm:grid-cols-3 gap-4">
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">Default Movie Profile</label>
                         <select name="default_movie_quality" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
-                            {% for p in profiles %}
-                            <option value="{{ p.name }}" {{ 'selected' if cfg.default_movie_quality == p.name }}>{{ p.name }}</option>
-                            {% endfor %}
-                            {% for q in ['2160p', '1080p', '720p', 'any'] %}
-                            <option value="{{ q }}" {{ 'selected' if cfg.default_movie_quality == q }}>{{ q }}</option>
-                            {% endfor %}
+                            {% for p in profiles %}<option value="{{ p.name }}" {{ 'selected' if cfg.default_movie_quality == p.name }}>{{ p.name }}</option>{% endfor %}
+                            {% for q in ['2160p', '1080p', '720p', 'any'] %}<option value="{{ q }}" {{ 'selected' if cfg.default_movie_quality == q }}>{{ q }}</option>{% endfor %}
                         </select>
                     </div>
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">Default TV Profile</label>
                         <select name="default_tv_quality" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
-                            {% for p in profiles %}
-                            <option value="{{ p.name }}" {{ 'selected' if cfg.default_tv_quality == p.name }}>{{ p.name }}</option>
-                            {% endfor %}
-                            {% for q in ['2160p', '1080p', '720p', 'any'] %}
-                            <option value="{{ q }}" {{ 'selected' if cfg.default_tv_quality == q }}>{{ q }}</option>
-                            {% endfor %}
+                            {% for p in profiles %}<option value="{{ p.name }}" {{ 'selected' if cfg.default_tv_quality == p.name }}>{{ p.name }}</option>{% endfor %}
+                            {% for q in ['2160p', '1080p', '720p', 'any'] %}<option value="{{ q }}" {{ 'selected' if cfg.default_tv_quality == q }}>{{ q }}</option>{% endfor %}
                         </select>
                     </div>
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">Default Music Quality</label>
                         <select name="default_music_quality" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
-                            {% for q in ['lossless', 'any'] %}
-                            <option value="{{ q }}" {{ 'selected' if cfg.default_music_quality == q }}>{{ q }}</option>
-                            {% endfor %}
+                            {% for q in ['lossless', 'any'] %}<option value="{{ q }}" {{ 'selected' if cfg.default_music_quality == q }}>{{ q }}</option>{% endfor %}
                         </select>
                     </div>
                 </div>
-
                 <div class="grid sm:grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">Minimum Seeders Required</label>
-                        <input type="number" name="min_seeders" value="{{ cfg.min_seeders }}"
-                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                        <input type="number" name="min_seeders" value="{{ cfg.min_seeders }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
                     </div>
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">Maximum Release Size (GB)</label>
-                        <input type="number" step="0.5" name="max_size_gb" value="{{ cfg.max_size_gb }}"
-                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                        <input type="number" step="0.5" name="max_size_gb" value="{{ cfg.max_size_gb }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
                     </div>
                 </div>
-
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">Preferred Release Keywords (+50 score each)</label>
-                    <input type="text" name="preferred_keywords" value="{{ cfg.preferred_keywords }}"
-                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    <input type="text" name="preferred_keywords" value="{{ cfg.preferred_keywords }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
                 </div>
-
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">Must Not Contain / Blocked Terms</label>
-                    <input type="text" name="blocked_keywords" value="{{ cfg.blocked_keywords }}"
-                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono text-rose-300">
+                    <input type="text" name="blocked_keywords" value="{{ cfg.blocked_keywords }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono text-rose-300">
                 </div>
-
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">
-                    Save Profiles
-                </button>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save Profiles</button>
             </form>
 
-            <!-- Imported Quality Profiles & Custom Formats -->
             <div class="grid md:grid-cols-2 gap-6">
                 <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
-                    <h3 class="text-base font-semibold text-indigo-300 border-b border-slate-800 pb-2 mb-3">
-                        Imported Quality Profiles ({{ profiles|length }})
-                    </h3>
-                    {% if profiles %}
+                    <h3 class="text-base font-semibold text-indigo-300 border-b border-slate-800 pb-2 mb-3">Imported Quality Profiles ({{ profiles|length }})</h3>
                     <ul class="space-y-2 text-xs">
                         {% for p in profiles %}
                         <li class="bg-slate-800/60 border border-slate-800 p-2.5 rounded flex justify-between">
                             <span class="font-medium text-slate-200">{{ p.name }}</span>
                             <span class="text-slate-400 uppercase">{{ p.source_app }} • Min Score: {{ p.min_format_score }}</span>
                         </li>
+                        {% else %}
+                        <li class="text-slate-400">Upload your Sonarr or Radarr backup .zip to import custom profiles.</li>
                         {% endfor %}
                     </ul>
-                    {% else %}
-                    <p class="text-xs text-slate-400">Upload your Sonarr or Radarr backup .zip to import your custom profiles.</p>
-                    {% endif %}
                 </div>
-
                 <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
-                    <h3 class="text-base font-semibold text-indigo-300 border-b border-slate-800 pb-2 mb-3">
-                        Imported Custom Formats ({{ custom_formats|length }})
-                    </h3>
-                    {% if custom_formats %}
+                    <h3 class="text-base font-semibold text-indigo-300 border-b border-slate-800 pb-2 mb-3">Imported Custom Formats ({{ custom_formats|length }})</h3>
                     <ul class="space-y-2 text-xs max-h-64 overflow-y-auto pr-1">
                         {% for cf in custom_formats %}
                         <li class="bg-slate-800/60 border border-slate-800 p-2.5 rounded flex justify-between">
                             <span class="font-medium text-slate-200">{{ cf.name }}</span>
                             <span class="text-slate-400 uppercase">{{ cf.source_app }}</span>
                         </li>
+                        {% else %}
+                        <li class="text-slate-400">Custom regex formats from Sonarr & Radarr appear here automatically on import.</li>
                         {% endfor %}
                     </ul>
-                    {% else %}
-                    <p class="text-xs text-slate-400">TRaSH Guides / custom regex formats from Sonarr & Radarr appear here automatically on import.</p>
-                    {% endif %}
                 </div>
             </div>
         </div>
@@ -375,26 +477,20 @@
                 <input type="hidden" name="section" value="indexers">
                 <div class="flex justify-between items-center border-b border-slate-800 pb-2">
                     <h2 class="text-lg font-semibold text-indigo-300">Prowlarr Connection</h2>
-                    <button type="button" onclick="testConn('prowlarr')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">
-                        Test Prowlarr
-                    </button>
+                    <button type="button" onclick="testConn('prowlarr')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">Test Prowlarr</button>
                 </div>
                 <div id="test-prowlarr" class="text-xs text-slate-400"></div>
                 <div class="grid sm:grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">Prowlarr URL</label>
-                        <input type="text" name="prowlarr_url" value="{{ cfg.prowlarr_url }}"
-                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                        <input type="text" name="prowlarr_url" value="{{ cfg.prowlarr_url }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
                     </div>
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">Prowlarr API Key</label>
-                        <input type="text" name="prowlarr_api_key" value="{{ cfg.prowlarr_api_key }}"
-                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                        <input type="text" name="prowlarr_api_key" value="{{ cfg.prowlarr_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
                     </div>
                 </div>
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">
-                    Save Prowlarr Config
-                </button>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save Prowlarr Config</button>
             </form>
 
             <form action="/settings/indexers" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
@@ -403,23 +499,15 @@
                     {% for idx in indexers %}
                     <div class="flex items-center justify-between bg-slate-800/60 border border-slate-800 px-3 py-2 rounded">
                         <label class="flex items-center gap-2.5 text-sm">
-                            <input type="checkbox" name="enabled_{{ idx.id }}" value="1" {{ 'checked' if idx.enabled }}
-                                   class="rounded bg-slate-700 border-slate-600 text-indigo-500">
+                            <input type="checkbox" name="enabled_{{ idx.id }}" value="1" {{ 'checked' if idx.enabled }}>
                             <span>{{ idx.name }}</span>
                             <span class="text-[11px] text-slate-500">({{ idx.implementation }})</span>
                         </label>
-                        <input type="number" name="priority_{{ idx.id }}" value="{{ idx.priority }}" title="Priority"
-                               class="w-16 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-center">
+                        <input type="number" name="priority_{{ idx.id }}" value="{{ idx.priority }}" class="w-16 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-center">
                     </div>
                     {% endfor %}
                 </div>
-                {% if indexers %}
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">
-                    Save Indexer States
-                </button>
-                {% else %}
-                <p class="text-xs text-slate-400">No indexers imported yet. Upload your Prowlarr backup .zip on the Library tab.</p>
-                {% endif %}
+                {% if indexers %}<button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save Indexer States</button>{% endif %}
             </form>
         </div>
         {% endif %}
@@ -430,54 +518,41 @@
             <input type="hidden" name="section" value="clients">
             <div class="flex justify-between items-center border-b border-slate-800 pb-2">
                 <h2 class="text-lg font-semibold text-indigo-300">qBittorrent & Remote Path Mappings</h2>
-                <button type="button" onclick="testConn('qbittorrent')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">
-                    Test qBittorrent
-                </button>
+                <button type="button" onclick="testConn('qbittorrent')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">Test qBittorrent</button>
             </div>
             <div id="test-qbittorrent" class="text-xs text-slate-400"></div>
-
             <div class="grid sm:grid-cols-2 gap-4">
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">qBittorrent URL</label>
-                    <input type="text" name="qbit_url" value="{{ cfg.qbit_url }}"
-                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    <input type="text" name="qbit_url" value="{{ cfg.qbit_url }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
                 </div>
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">Category</label>
-                    <input type="text" name="qbit_category" value="{{ cfg.qbit_category }}"
-                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    <input type="text" name="qbit_category" value="{{ cfg.qbit_category }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
                 </div>
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">Username</label>
-                    <input type="text" name="qbit_user" value="{{ cfg.qbit_user }}"
-                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                    <input type="text" name="qbit_user" value="{{ cfg.qbit_user }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
                 </div>
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">Password</label>
-                    <input type="password" name="qbit_pass" value="{{ cfg.qbit_pass }}"
-                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                    <input type="password" name="qbit_pass" value="{{ cfg.qbit_pass }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
                 </div>
             </div>
-
             <div class="border-t border-slate-800 pt-4">
                 <h3 class="text-sm font-semibold text-slate-300 mb-3">Remote Path Mapping</h3>
                 <div class="grid sm:grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">Remote Path (Windows / UNC Marker)</label>
-                        <input type="text" name="qbit_remote_path" value="{{ cfg.qbit_remote_path }}"
-                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                        <input type="text" name="qbit_remote_path" value="{{ cfg.qbit_remote_path }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
                     </div>
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">Local Path (LXC Mount)</label>
-                        <input type="text" name="qbit_local_mount" value="{{ cfg.qbit_local_mount }}"
-                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                        <input type="text" name="qbit_local_mount" value="{{ cfg.qbit_local_mount }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
                     </div>
                 </div>
             </div>
-
-            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">
-                Save Download Client
-            </button>
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save Download Client</button>
         </form>
         {% endif %}
 
@@ -488,47 +563,32 @@
             <div>
                 <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
                     <h2 class="text-lg font-semibold text-indigo-300">Plex Media Server Connection</h2>
-                    <button type="button" onclick="testConn('plex')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">
-                        Test Plex
-                    </button>
+                    <button type="button" onclick="testConn('plex')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">Test Plex</button>
                 </div>
                 <div id="test-plex" class="text-xs text-slate-400 mb-2"></div>
                 <div class="grid sm:grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">Plex URL</label>
-                        <input type="text" name="plex_url" value="{{ cfg.plex_url }}"
-                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                        <input type="text" name="plex_url" value="{{ cfg.plex_url }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
                     </div>
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">X-Plex-Token</label>
-                        <input type="text" name="plex_token" value="{{ cfg.plex_token }}"
-                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                        <input type="text" name="plex_token" value="{{ cfg.plex_token }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
                     </div>
                 </div>
                 <div class="flex gap-6 mt-3 text-sm text-slate-300">
-                    <label class="flex items-center gap-2">
-                        <input type="checkbox" name="plex_notify_grab" value="true" {{ 'checked' if cfg.plex_notify_grab == 'true' }}>
-                        <span>On Grab</span>
-                    </label>
-                    <label class="flex items-center gap-2">
-                        <input type="checkbox" name="plex_notify_import" value="true" {{ 'checked' if cfg.plex_notify_import == 'true' }}>
-                        <span>On Import / Upgrade</span>
-                    </label>
+                    <label class="flex items-center gap-2"><input type="checkbox" name="plex_notify_grab" value="true" {{ 'checked' if cfg.plex_notify_grab == 'true' }}><span>On Grab</span></label>
+                    <label class="flex items-center gap-2"><input type="checkbox" name="plex_notify_import" value="true" {{ 'checked' if cfg.plex_notify_import == 'true' }}><span>On Import / Upgrade</span></label>
                 </div>
             </div>
-
             <div class="border-t border-slate-800 pt-4">
                 <h2 class="text-lg font-semibold text-indigo-300 mb-3">General & Seerr API Security</h2>
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">OmniArr API Key (Use this in Seerr)</label>
-                    <input type="text" name="omniarr_api_key" value="{{ cfg.omniarr_api_key }}"
-                           class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    <input type="text" name="omniarr_api_key" value="{{ cfg.omniarr_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
                 </div>
             </div>
-
-            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">
-                Save General & Connect Settings
-            </button>
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save General & Connect Settings</button>
         </form>
         {% endif %}
     </div>
@@ -537,6 +597,44 @@
         function toggleEpisodes(id) {
             const el = document.getElementById(id);
             if (el) el.classList.toggle('hidden');
+        }
+        function filterLibrary(type) {
+            const m = document.getElementById('section-movies');
+            const t = document.getElementById('section-tv');
+            if (m) m.style.display = (type === 'all' || type === 'movies') ? 'block' : 'none';
+            if (t) t.style.display = (type === 'all' || type === 'tv') ? 'block' : 'none';
+            document.querySelectorAll('.lib-filter-btn').forEach(btn => {
+                btn.className = 'lib-filter-btn bg-slate-800 text-slate-300 hover:bg-slate-700 px-3 py-1.5 rounded text-xs font-semibold';
+            });
+            const active = document.getElementById('btn-lib-' + type);
+            if (active) active.className = 'lib-filter-btn bg-indigo-600 text-white px-3 py-1.5 rounded text-xs font-semibold';
+        }
+        function setLayout(mode) {
+            localStorage.setItem('omniarr_layout', mode);
+            const isList = mode === 'list';
+            document.querySelectorAll('.media-container').forEach(c => {
+                c.className = isList
+                    ? 'media-container flex flex-col gap-3'
+                    : 'media-container grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4';
+            });
+            document.querySelectorAll('.card-inner').forEach(el => {
+                el.className = isList ? 'card-inner flex flex-row items-center' : 'card-inner flex flex-col h-full';
+            });
+            document.querySelectorAll('.poster-box').forEach(el => {
+                el.className = isList
+                    ? 'poster-box relative w-24 h-36 bg-slate-800 overflow-hidden flex-shrink-0'
+                    : 'poster-box relative w-full aspect-[2/3] bg-slate-800 overflow-hidden flex-shrink-0';
+            });
+            document.querySelectorAll('.grid-badge').forEach(el => el.classList.toggle('hidden', isList));
+            document.querySelectorAll('.list-badge').forEach(el => el.classList.toggle('hidden', !isList));
+            document.querySelectorAll('.list-path').forEach(el => el.classList.toggle('hidden', !isList));
+
+            const gBtn = document.getElementById('btn-view-grid');
+            const lBtn = document.getElementById('btn-view-list');
+            if (gBtn && lBtn) {
+                gBtn.className = isList ? 'px-2.5 py-1 rounded text-slate-300 hover:text-white font-medium' : 'px-2.5 py-1 rounded bg-indigo-600 text-white font-medium';
+                lBtn.className = isList ? 'px-2.5 py-1 rounded bg-indigo-600 text-white font-medium' : 'px-2.5 py-1 rounded text-slate-300 hover:text-white font-medium';
+            }
         }
         async function testConn(service) {
             const el = document.getElementById('test-' + service);
@@ -547,6 +645,10 @@
             el.textContent = data.detail;
             el.className = data.ok ? 'text-xs text-emerald-400 font-medium' : 'text-xs text-rose-400 font-medium';
         }
+        document.addEventListener('DOMContentLoaded', () => {
+            const saved = localStorage.getItem('omniarr_layout');
+            if (saved === 'list') setLayout('list');
+        });
     </script>
 </body>
 </html>

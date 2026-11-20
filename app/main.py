@@ -56,8 +56,17 @@ def verify_api_key(x_api_key: str = Header(None), apikey: str = None, db: Sessio
 # --- WEB UI ROUTES ---
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, tab: str = "library", msg: str = "", db: Session = Depends(get_db)):
-    items = db.query(MediaItem).order_by(MediaItem.added_at.desc()).all()
+def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", msg: str = "", db: Session = Depends(get_db)):
+    q = db.query(MediaItem)
+    if sort == "added_asc":
+        q = q.order_by(MediaItem.added_at.asc())
+    elif sort == "title_asc":
+        q = q.order_by(MediaItem.title.asc())
+    elif sort == "title_desc":
+        q = q.order_by(MediaItem.title.desc())
+    else:
+        q = q.order_by(MediaItem.added_at.desc())
+    items = q.all()
     episodes_by_media = {}
     for ep in db.query(EpisodeItem).order_by(EpisodeItem.season_number.asc(), EpisodeItem.episode_number.asc()).all():
         episodes_by_media.setdefault(ep.media_item_id, []).append(ep)
@@ -78,6 +87,7 @@ def dashboard(request: Request, tab: str = "library", msg: str = "", db: Session
         "custom_formats": custom_formats,
         "drives": drives,
         "active_tab": tab,
+        "sort": sort,
         "msg": msg,
     })
 
@@ -105,6 +115,23 @@ async def add_media(
 
     await sync_posters_from_plex(db)
     return RedirectResponse(url="/", status_code=303)
+
+@app.post("/search/{item_id}")
+async def search_upgrade_media(item_id: int, db: Session = Depends(get_db)):
+    item = db.query(MediaItem).filter(MediaItem.id == item_id).first()
+    if not item:
+        return RedirectResponse(url="/?msg=Item+not+found", status_code=303)
+    query = f"{item.title} {item.year}" if item.year else item.title
+    releases = await search_prowlarr(query, item.media_type, item.quality_profile, db)
+    if releases:
+        best = releases[0]
+        t_hash = await send_to_qbittorrent(best["downloadUrl"], item.id, db)
+        if t_hash:
+            item.torrent_hash = t_hash
+            item.status = "downloading"
+            db.commit()
+            return RedirectResponse(url=f"/?msg=Grabbed+release+for+{item.title.replace(' ', '+')}", status_code=303)
+    return RedirectResponse(url=f"/?msg=No+matching+releases+found+for+{item.title.replace(' ', '+')}", status_code=303)
 
 @app.post("/delete/{item_id}")
 def delete_media(item_id: int, db: Session = Depends(get_db)):
