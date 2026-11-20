@@ -1,6 +1,6 @@
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, Request, Form, HTTPException, Header
+from fastapi import FastAPI, Depends, Request, Form, HTTPException, Header, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -9,6 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .database import engine, Base, get_db, SessionLocal
 from .models import MediaItem
 from .services import search_prowlarr, send_to_qbittorrent, check_downloads_and_import
+from .importer import parse_and_import_backup
 
 Base.metadata.create_all(bind=engine)
 API_KEY = os.getenv("OMNIARR_API_KEY", "change_me_to_a_secure_key")
@@ -88,8 +89,15 @@ def delete_media(item_id: int, db: Session = Depends(get_db)):
         db.commit()
     return RedirectResponse(url="/", status_code=303)
 
+@app.post("/import-backup")
+async def import_backup(backup_file: UploadFile = File(...), db: Session = Depends(get_db)):
+    if not backup_file.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Please upload a valid .zip backup file.")
+    content = await backup_file.read()
+    result = parse_and_import_backup(content, db)
+    return {"status": "success", "details": result}
+
 # --- SEERR (OVERSEERR / JELLYSEERR) COMPATIBILITY API ---
-# Point Seerr's Radarr & Sonarr settings to http://omniarr:8585 with OMNIARR_API_KEY
 
 @app.get("/api/v3/system/status", dependencies=[Depends(verify_api_key)])
 def arr_system_status():
