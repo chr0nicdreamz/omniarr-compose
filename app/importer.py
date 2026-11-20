@@ -20,6 +20,13 @@ def _extract_poster(images_raw: str) -> str:
         pass
     return ""
 
+def _table_columns(cur: sqlite3.Cursor, table_name: str) -> set:
+    try:
+        cur.execute(f"PRAGMA table_info({table_name})")
+        return {row[1] for row in cur.fetchall()}
+    except sqlite3.OperationalError:
+        return set()
+
 def _import_profiles_and_cfs(cur: sqlite3.Cursor, app_name: str, db: Session) -> tuple[int, int]:
     profiles_added = 0
     cfs_added = 0
@@ -51,7 +58,11 @@ def _import_profiles_and_cfs(cur: sqlite3.Cursor, app_name: str, db: Session) ->
         pass
 
     try:
-        cur.execute("SELECT Name, UpgradeAllowed, MinFormatScore, FormatItems FROM QualityProfiles")
+        cols = _table_columns(cur, "QualityProfiles")
+        min_score_col = "MinFormatScore" if "MinFormatScore" in cols else "0 AS MinFormatScore"
+        upgrade_col = "UpgradeAllowed" if "UpgradeAllowed" in cols else "1 AS UpgradeAllowed"
+        fmt_col = "FormatItems" if "FormatItems" in cols else "'[]' AS FormatItems"
+        cur.execute(f"SELECT Name, {upgrade_col}, {min_score_col}, {fmt_col} FROM QualityProfiles")
         for row in cur.fetchall():
             format_items = json.loads(row["FormatItems"] or "[]")
             scores_map = {}
@@ -156,7 +167,6 @@ def parse_and_import_backup(zip_bytes: bytes, db: Session) -> dict:
             summary["imported_profiles"] = p_cnt
             summary["imported_custom_formats"] = cf_cnt
 
-        # Map Profile ID -> Name for media assignment
         profile_names = {}
         try:
             cur.execute("SELECT Id, Name FROM QualityProfiles")
@@ -165,9 +175,22 @@ def parse_and_import_backup(zip_bytes: bytes, db: Session) -> dict:
             pass
 
         if app_name == "radarr":
-            cur.execute("SELECT Title, Year, TmdbId, Monitored, MovieFileId, Path, QualityProfileId, Images FROM Movies")
+            movie_cols = _table_columns(cur, "Movies")
+            if "MovieMetadataId" in movie_cols:
+                # Radarr v5+ schema (metadata split into MovieMetadata table)
+                cur.execute("""
+                    SELECT mm.Title, mm.Year, mm.TmdbId, mm.Images,
+                           m.Monitored, m.MovieFileId, m.Path, m.QualityProfileId
+                    FROM Movies m
+                    JOIN MovieMetadata mm ON m.MovieMetadataId = mm.Id
+                """)
+            else:
+                # Radarr v3/v4 schema
+                img_sel = "Images" if "Images" in movie_cols else "'' AS Images"
+                cur.execute(f"SELECT Title, Year, TmdbId, Monitored, MovieFileId, Path, QualityProfileId, {img_sel} FROM Movies")
+
             for row in cur.fetchall():
-                poster = _extract_poster(row["Images"] if "Images" in row.keys() else "")
+                poster = _extract_poster(row["Images"] or "")
                 prof_name = profile_names.get(row["QualityProfileId"], "1080p")
                 exists = db.query(MediaItem).filter_by(media_type="movie", external_id=str(row["TmdbId"])).first()
                 if not exists:
@@ -187,7 +210,6 @@ def parse_and_import_backup(zip_bytes: bytes, db: Session) -> dict:
                     exists.poster_url = poster
 
         elif app_name == "sonarr":
-            # Build EpisodeFile lookup map: EpisodeFileId -> {RelativePath, SceneName}
             ep_files = {}
             try:
                 cur.execute("SELECT Id, RelativePath, SceneName FROM EpisodeFiles")
@@ -199,10 +221,12 @@ def parse_and_import_backup(zip_bytes: bytes, db: Session) -> dict:
             except sqlite3.OperationalError:
                 pass
 
-            cur.execute("SELECT Id, Title, Year, TvdbId, Monitored, Path, QualityProfileId, Images FROM Series")
-            series_map = {}  # Sonarr Series.Id -> MediaItem
+            series_cols = _table_columns(cur, "Series")
+            img_sel = "Images" if "Images" in series_cols else "'' AS Images"
+            cur.execute(f"SELECT Id, Title, Year, TvdbId, Monitored, Path, QualityProfileId, {img_sel} FROM Series")
+            series_map = {}
             for row in cur.fetchall():
-                poster = _extract_poster(row["Images"] if "Images" in row.keys() else "")
+                poster = _extract_poster(row["Images"] or "")
                 prof_name = profile_names.get(row["QualityProfileId"], "1080p")
                 media_obj = db.query(MediaItem).filter_by(media_type="tv", external_id=str(row["TvdbId"])).first()
                 if not media_obj:
@@ -225,7 +249,6 @@ def parse_and_import_backup(zip_bytes: bytes, db: Session) -> dict:
                         media_obj.poster_url = poster
                 series_map[row["Id"]] = media_obj
 
-            # Import all grabbed episodes (EpisodeFileId > 0)
             try:
                 cur.execute("""
                     SELECT SeriesId, SeasonNumber, EpisodeNumber, Title, EpisodeFileId
