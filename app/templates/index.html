@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <title>OmniArr — Unified Media Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-8">
+    <div class="max-w-5xl mx-auto">
+        <header class="flex justify-between items-center mb-8 border-b border-slate-700 pb-4">
+            <h1 class="text-3xl font-bold text-indigo-400">OmniArr</h1>
+            <span class="text-sm text-slate-400">Movies • TV • Music</span>
+        </header>
+
+        <!-- Add Media Form -->
+        <form action="/add" method="post" class="bg-slate-800 p-4 rounded-lg mb-8 flex flex-wrap gap-3 items-end">
+            <div class="flex-1 min-w-[200px]">
+                <label class="block text-xs text-slate-400 mb-1">Title / Artist - Album</label>
+                <input type="text" name="title" required placeholder="e.g. Dune Part Two"
+                       class="w-full bg-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            </div>
+            <div class="w-24">
+                <label class="block text-xs text-slate-400 mb-1">Year</label>
+                <input type="number" name="year" placeholder="2024"
+                       class="w-full bg-slate-700 rounded px-3 py-2 text-sm">
+            </div>
+            <div class="w-32">
+                <label class="block text-xs text-slate-400 mb-1">Type</label>
+                <select name="media_type" class="w-full bg-slate-700 rounded px-3 py-2 text-sm">
+                    <option value="movie">Movie</option>
+                    <option value="tv">TV Show</option>
+                    <option value="music">Music</option>
+                </select>
+            </div>
+            <div class="w-32">
+                <label class="block text-xs text-slate-400 mb-1">Quality</label>
+                <select name="quality_profile" class="w-full bg-slate-700 rounded px-3 py-2 text-sm">
+                    <option value="1080p">1080p</option>
+                    <option value="2160p">2160p (4K)</option>
+                    <option value="720p">720p</option>
+                    <option value="lossless">Lossless (FLAC)</option>
+                    <option value="any">Any</option>
+                </select>
+            </div>
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded text-sm font-medium">
+                Add & Search
+            </button>
+        </form>
+
+        <!-- Library Table -->
+        <div class="bg-slate-800 rounded-lg overflow-hidden">
+            <table class="w-full text-left text-sm">
+                <thead class="bg-slate-700/50 text-slate-300 uppercase text-xs">
+                    <tr>
+                        <th class="px-4 py-3">Title</th>
+                        <th class="px-4 py-3">Type</th>
+                        <th class="px-4 py-3">Quality</th>
+                        <th class="px-4 py-3">Status</th>
+                        <th class="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700">
+                    {% for item in items %}
+                    <tr>
+                        <td class="px-4 py-3 font-medium">
+                            {{ item.title }} {% if item.year %}<span class="text-slate-400">({{ item.year }})</span>{% endif %}
+                        </td>
+                        <td class="px-4 py-3 uppercase text-xs text-slate-400">{{ item.media_type }}</td>
+                        <td class="px-4 py-3">{{ item.quality_profile }}</td>
+                        <td class="px-4 py-3">
+                            {% if item.status == 'available' %}
+                                <span class="bg-emerald-500/20 text-emerald-300 px-2 py-1 rounded text-xs">Available</span>
+                            {% elif item.status == 'downloading' %}
+                                <span class="bg-amber-500/20 text-amber-300 px-2 py-1 rounded text-xs">Downloading</span>
+                            {% else %}
+                                <span class="bg-slate-600/40 text-slate-300 px-2 py-1 rounded text-xs">Wanted</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-right">
+                            <form action="/delete/{{ item.id }}" method="post" class="inline">
+                                <button type="submit" class="text-rose-400 hover:text-rose-300 text-xs">Remove</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>
