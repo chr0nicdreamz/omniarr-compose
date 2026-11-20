@@ -1,3 +1,4 @@
+import secrets
 from pathlib import Path
 import shutil
 import os
@@ -63,6 +64,12 @@ def verify_api_key(x_api_key: str = Header(None), apikey: str = None, db: Sessio
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
 # --- WEB UI ROUTES ---
+
+@app.post("/api/settings/rotate-key")
+def rotate_omniarr_api_key(db: Session = Depends(get_db)):
+    new_key = secrets.token_hex(16)
+    save_settings(db, {"omniarr_api_key": new_key})
+    return RedirectResponse(url="/?tab=connect&msg=OmniArr+API+Key+rotated+successfully", status_code=303)
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", q: str = "", media_type: str = "", page: int = 1, msg: str = "", db: Session = Depends(get_db)):

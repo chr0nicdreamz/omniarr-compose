@@ -737,7 +737,21 @@
                 <h2 class="text-lg font-semibold text-indigo-300 mb-3">General & Seerr API Security</h2>
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">OmniArr API Key (Use this in Seerr)</label>
-                    <input type="text" name="omniarr_api_key" value="{{ cfg.omniarr_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    <div class="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                        <div class="relative flex-1 min-w-[220px]">
+                            <input id="omniarr-api-key-input" type="password" name="omniarr_api_key" value="{{ cfg.omniarr_api_key }}"
+                                   class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 pr-9 text-sm font-mono">
+                            <button type="button" onclick="const inp=document.getElementById('omniarr-api-key-input'); inp.type = inp.type === 'password' ? 'text' : 'password';"
+                                    title="Show / Hide API Key"
+                                    class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs">👁</button>
+                        </div>
+                        <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('omniarr-api-key-input').value); this.textContent='✓ Copied'; setTimeout(()=>this.textContent='📋 Copy', 1500);"
+                                class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2 rounded text-xs font-medium text-slate-200 whitespace-nowrap">📋 Copy</button>
+                        <button type="submit" formaction="/api/settings/rotate-key" formmethod="post"
+                                onclick="return confirm('Generate a brand-new OmniArr API Key? Any connected apps like Seerr will need the updated key.');"
+                                class="bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 px-3 py-2 rounded text-xs font-medium whitespace-nowrap">↻ Rotate Key</button>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mt-1.5">Paste your own custom key and click Save below, or click <strong>↻ Rotate Key</strong> to generate a new 32-character token immediately.</p>
                 </div>
             </div>
 
