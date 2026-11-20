@@ -65,17 +65,37 @@ def verify_api_key(x_api_key: str = Header(None), apikey: str = None, db: Sessio
 # --- WEB UI ROUTES ---
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", msg: str = "", db: Session = Depends(get_db)):
-    q = db.query(MediaItem)
+def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", q: str = "", media_type: str = "", page: int = 1, msg: str = "", db: Session = Depends(get_db)):
+    base_q = db.query(MediaItem)
+    search_q = q.strip()
+    if search_q:
+        base_q = base_q.filter(MediaItem.title.ilike(f"%{search_q}%"))
+
     if sort == "added_asc":
-        q = q.order_by(MediaItem.added_at.asc())
+        order_col = MediaItem.added_at.asc()
     elif sort == "title_asc":
-        q = q.order_by(MediaItem.title.asc())
+        order_col = MediaItem.title.asc()
     elif sort == "title_desc":
-        q = q.order_by(MediaItem.title.desc())
+        order_col = MediaItem.title.desc()
     else:
-        q = q.order_by(MediaItem.added_at.desc())
-    items = q.all()
+        order_col = MediaItem.added_at.desc()
+
+    per_page = 30
+    movie_q = base_q.filter(MediaItem.media_type == "movie")
+    tv_q = base_q.filter(MediaItem.media_type == "tv")
+
+    total_movies = movie_q.count()
+    total_tv = tv_q.count()
+    total_items = total_movies + total_tv
+
+    max_count = max(total_movies, total_tv, 1)
+    total_pages = max(1, (max_count + per_page - 1) // per_page)
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * per_page
+
+    movie_slice = movie_q.order_by(order_col).offset(offset).limit(per_page).all()
+    tv_slice = tv_q.order_by(order_col).offset(offset).limit(per_page).all()
+    items = movie_slice + tv_slice
     episode_counts = dict(
         db.query(EpisodeItem.media_item_id, func.count(EpisodeItem.id))
         .group_by(EpisodeItem.media_item_id)
@@ -111,6 +131,13 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
         "root_folders": root_folders,
         "active_tab": tab,
         "sort": sort,
+        "q": search_q,
+        "media_type": media_type,
+        "page": page,
+        "total_pages": total_pages,
+        "total_items": total_items,
+        "total_movies": total_movies,
+        "total_tv": total_tv,
         "msg": msg,
     })
 

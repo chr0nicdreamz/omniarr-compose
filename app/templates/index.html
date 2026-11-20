@@ -184,11 +184,6 @@
             </div>
             <div class="w-32">
                 <label class="block text-xs text-slate-400 mb-1">Type</label>
-                <select name="media_type" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
-                    <option value="movie">Movie</option>
-                    <option value="tv">TV Show</option>
-                    <option value="music">Music</option>
-                </select>
             </div>
             <div class="w-40">
                 <label class="block text-xs text-slate-400 mb-1">Quality Profile</label>
@@ -214,15 +209,15 @@
             <div class="flex flex-wrap items-center gap-1.5">
                 <button type="button" onclick="filterLibrary('all')" id="btn-lib-all"
                         class="lib-filter-btn bg-indigo-600 text-white px-3 py-1.5 rounded text-xs font-semibold">
-                    All ({{ items|length }})
+                    All ({{ total_items }})
                 </button>
                 <button type="button" onclick="filterLibrary('movies')" id="btn-lib-movies"
                         class="lib-filter-btn bg-slate-800 text-slate-300 hover:bg-slate-700 px-3 py-1.5 rounded text-xs font-semibold">
-                    🎬 Movies ({{ movie_items|length }})
+                    🎬 Movies ({{ total_movies }})
                 </button>
                 <button type="button" onclick="filterLibrary('tv')" id="btn-lib-tv"
                         class="lib-filter-btn bg-slate-800 text-slate-300 hover:bg-slate-700 px-3 py-1.5 rounded text-xs font-semibold">
-                    📺 TV Shows ({{ tv_items|length }})
+                    📺 TV Shows ({{ total_tv }})
                 </button>
             </div>
 
@@ -256,6 +251,37 @@
         <!-- MOVIES SECTION -->
         {% set movies_available = movie_items | selectattr('status', 'equalto', 'available') | list %}
         {% set movies_wanted = movie_items | rejectattr('status', 'equalto', 'available') | list %}
+
+                <!-- Library Search, Type Filter & Pagination Bar -->
+        <form method="get" action="/" class="flex flex-wrap items-center justify-between gap-3 bg-slate-900/80 border border-slate-800 p-3 rounded-xl mb-6">
+            <input type="hidden" name="tab" value="library">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            <div class="flex flex-wrap items-center gap-2 flex-1 min-w-[240px]">
+                <input type="text" name="q" value="{{ q }}" placeholder="Filter {{ total_items }} titles..."
+                       class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 w-64">
+                <select name="media_type" onchange="this.form.submit()" class="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200">
+                    <option value="">All Types ({{ total_items }})</option>
+                    <option value="movie" {{ 'selected' if media_type == 'movie' }}>Movies</option>
+                    <option value="tv" {{ 'selected' if media_type == 'tv' }}>TV Shows</option>
+                    <option value="music" {{ 'selected' if media_type == 'music' }}>Music</option>
+                </select>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-xs font-medium">Filter</button>
+                {% if q or media_type %}
+                <a href="/?tab=library&sort={{ sort }}" class="text-xs text-slate-400 hover:text-slate-200 px-2">Reset</a>
+                {% endif %}
+            </div>
+            <div class="flex items-center gap-2 text-xs text-slate-400">
+                <span>Page <strong class="text-slate-200">{{ page }}</strong> of <strong class="text-slate-200">{{ total_pages }}</strong> ({{ total_items }} items)</span>
+                {% if page > 1 %}
+                <a href="/?tab=library&sort={{ sort }}&q={{ q }}&page={{ page - 1 }}"
+                   class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 py-1 rounded text-slate-200">← Prev</a>
+                {% endif %}
+                {% if page < total_pages %}
+                <a href="/?tab=library&sort={{ sort }}&q={{ q }}&page={{ page + 1 }}"
+                   class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 py-1 rounded text-slate-200">Next →</a>
+                {% endif %}
+            </div>
+        </form>
 
         <section id="section-movies" class="mb-10 space-y-6">
             <div class="flex items-center justify-between border-b border-slate-800 pb-2">
@@ -318,6 +344,19 @@
                 {% endif %}
             </div>
         </section>
+        {% if total_pages > 1 %}
+        <div class="flex items-center justify-center gap-3 mt-4 mb-8 py-3 text-xs">
+            {% if page > 1 %}
+            <a href="/?tab=library&sort={{ sort }}&q={{ q }}&page={{ page - 1 }}"
+               class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3.5 py-1.5 rounded-lg text-slate-200">← Previous Page</a>
+            {% endif %}
+            <span class="text-slate-400">Page <strong class="text-slate-200">{{ page }}</strong> of <strong class="text-slate-200">{{ total_pages }}</strong></span>
+            {% if page < total_pages %}
+            <a href="/?tab=library&sort={{ sort }}&q={{ q }}&page={{ page + 1 }}"
+               class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3.5 py-1.5 rounded-lg text-slate-200">Next Page →</a>
+            {% endif %}
+        </div>
+        {% endif %}
         {% endif %}
 
         <!-- TAB 2: MEDIA MANAGEMENT -->
