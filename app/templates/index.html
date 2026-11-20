@@ -629,22 +629,28 @@
 
         <!-- TAB 6: CONNECT & GENERAL -->
         {% if active_tab == 'connect' %}
-        <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-5 max-w-3xl">
+        <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-6 max-w-3xl">
             <input type="hidden" name="section" value="connect">
+
+            <!-- Plex Connection -->
             <div>
                 <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
-                    <h2 class="text-lg font-semibold text-indigo-300">Plex Media Server Connection</h2>
+                    <h2 class="text-lg font-semibold text-indigo-300">Plex Media Server</h2>
                     <button type="button" onclick="testConn('plex')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">Test Plex</button>
                 </div>
                 <div id="test-plex" class="text-xs text-slate-400 mb-2"></div>
                 <div class="grid sm:grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">Plex URL</label>
-                        <input type="text" name="plex_url" value="{{ cfg.plex_url }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                        <input type="text" name="plex_url" value="{{ cfg.plex_url }}" placeholder="http://localhost:32400" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
                     </div>
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">X-Plex-Token</label>
-                        <input type="text" name="plex_token" value="{{ cfg.plex_token }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                        <div class="flex gap-1.5">
+                            <input type="password" id="input-plex-token" name="plex_token" value="{{ cfg.plex_token }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                            <button type="button" onclick="toggleSecret('input-plex-token')" title="Show/Hide Token"
+                                    class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 rounded text-xs text-slate-300">👁</button>
+                        </div>
                     </div>
                 </div>
                 <div class="flex gap-6 mt-3 text-sm text-slate-300">
@@ -652,19 +658,75 @@
                     <label class="flex items-center gap-2"><input type="checkbox" name="plex_notify_import" value="true" {{ 'checked' if cfg.plex_notify_import == 'true' }}><span>On Import / Upgrade</span></label>
                 </div>
             </div>
-            <div class="border-t border-slate-800 pt-4">
+
+            <!-- Jellyfin Connection -->
+            <div class="border-t border-slate-800 pt-5">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
+                    <h2 class="text-lg font-semibold text-indigo-300">Jellyfin Media Server</h2>
+                    <button type="button" onclick="testConn('jellyfin')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">Test Jellyfin</button>
+                </div>
+                <div id="test-jellyfin" class="text-xs text-slate-400 mb-2"></div>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Jellyfin URL</label>
+                        <input type="text" name="jellyfin_url" value="{{ cfg.jellyfin_url }}" placeholder="http://localhost:8096" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Jellyfin API Key</label>
+                        <div class="flex gap-1.5">
+                            <input type="password" id="input-jellyfin-key" name="jellyfin_api_key" value="{{ cfg.jellyfin_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                            <button type="button" onclick="toggleSecret('input-jellyfin-key')" title="Show/Hide Key"
+                                    class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 rounded text-xs text-slate-300">👁</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-6 mt-3 text-sm text-slate-300">
+                    <label class="flex items-center gap-2"><input type="checkbox" name="jellyfin_notify" value="true" {{ 'checked' if cfg.jellyfin_notify == 'true' }}><span>Refresh Library on Grab / Import</span></label>
+                </div>
+            </div>
+
+            <!-- Emby Connection -->
+            <div class="border-t border-slate-800 pt-5">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
+                    <h2 class="text-lg font-semibold text-indigo-300">Emby Media Server</h2>
+                    <button type="button" onclick="testConn('emby')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">Test Emby</button>
+                </div>
+                <div id="test-emby" class="text-xs text-slate-400 mb-2"></div>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Emby URL</label>
+                        <input type="text" name="emby_url" value="{{ cfg.emby_url }}" placeholder="http://localhost:8096" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Emby API Key</label>
+                        <div class="flex gap-1.5">
+                            <input type="password" id="input-emby-key" name="emby_api_key" value="{{ cfg.emby_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                            <button type="button" onclick="toggleSecret('input-emby-key')" title="Show/Hide Key"
+                                    class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 rounded text-xs text-slate-300">👁</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-6 mt-3 text-sm text-slate-300">
+                    <label class="flex items-center gap-2"><input type="checkbox" name="emby_notify" value="true" {{ 'checked' if cfg.emby_notify == 'true' }}><span>Refresh Library on Grab / Import</span></label>
+                </div>
+            </div>
+
+            <!-- Seerr & General Security -->
+            <div class="border-t border-slate-800 pt-5">
                 <h2 class="text-lg font-semibold text-indigo-300 mb-3">General & Seerr API Security</h2>
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">OmniArr API Key (Use this in Seerr)</label>
                     <input type="text" name="omniarr_api_key" value="{{ cfg.omniarr_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
                 </div>
             </div>
+
             <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save General & Connect Settings</button>
         </form>
         {% endif %}
     </div>
 
     <script>
+        function toggleSecret(id) { const el = document.getElementById(id); if (el) el.type = (el.type === 'password') ? 'text' : 'password'; }
         function toggleEpisodes(id) {
             const el = document.getElementById(id);
             if (el) el.classList.toggle('hidden');

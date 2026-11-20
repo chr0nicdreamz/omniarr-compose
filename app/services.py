@@ -41,6 +41,12 @@ DEFAULT_SETTINGS = {
     "plex_token": os.getenv("PLEX_TOKEN", ""),
     "plex_notify_grab": "false",
     "plex_notify_import": "true",
+    "jellyfin_url": os.getenv("JELLYFIN_URL", ""),
+    "jellyfin_api_key": os.getenv("JELLYFIN_API_KEY", ""),
+    "jellyfin_notify": "true",
+    "emby_url": os.getenv("EMBY_URL", ""),
+    "emby_api_key": os.getenv("EMBY_API_KEY", ""),
+    "emby_notify": "true",
     "qbit_url": os.getenv("QBIT_URL", "http://localhost:8080"),
     "qbit_user": os.getenv("QBIT_USER", "admin"),
     "qbit_pass": os.getenv("QBIT_PASS", ""),
@@ -257,7 +263,36 @@ async def sync_posters_from_plex(db: Session) -> int:
                     if item.poster_url != full_url:
                         item.poster_url = full_url
                         updated += 1
-            db.commit()
+            for srv_prefix in ("jellyfin", "emby"):
+                s_url = cfg.get(f"{srv_prefix}_url", "").rstrip("/")
+                s_key = cfg.get(f"{srv_prefix}_api_key", "").strip()
+                if not s_url or not s_key:
+                    continue
+                try:
+                    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0)) as client:
+                        resp = await client.get(
+                            f"{s_url}/Items",
+                            params={"Recursive": "true", "IncludeItemTypes": "Movie,Series", "Fields": "ProviderIds"},
+                            headers={"X-Emby-Token": s_key}
+                        )
+                        if resp.status_code == 200:
+                            for j_item in resp.json().get("Items", []):
+                                j_id = j_item.get("Id")
+                                j_title = (j_item.get("Name") or "").lower()
+                                j_year = j_item.get("ProductionYear")
+                                if not j_id:
+                                    continue
+                                img_url = f"{s_url}/Items/{j_id}/Images/Primary?maxWidth=400&api_key={s_key}"
+                                for m in items:
+                                    if m.poster_url:
+                                        continue
+                                    if m.title.lower() == j_title and (not m.year or not j_year or m.year == j_year):
+                                        m.poster_url = img_url
+                                        updated += 1
+                except Exception:
+                    pass
+
+        db.commit()
     except Exception:
         pass
     return updated
@@ -286,11 +321,35 @@ async def send_to_qbittorrent(download_url: str, item_id: int, db: Session) -> s
         return torrents[0]["hash"] if torrents else ""
 
 async def trigger_plex_scan(cfg: dict):
-    token = cfg.get("plex_token", "")
-    if not token:
-        return
+    """Notifies Plex, Jellyfin, and/or Emby to refresh libraries after a grab or import."""
     async with httpx.AsyncClient(timeout=10.0) as client:
-        await client.get(f"{cfg['plex_url'].rstrip('/')}/library/sections/all/refresh", params={"X-Plex-Token": token})
+        if cfg.get("plex_url") and cfg.get("plex_token"):
+            try:
+                await client.get(
+                    f"{cfg['plex_url'].rstrip('/')}/library/sections/all/refresh",
+                    params={"X-Plex-Token": cfg["plex_token"]}
+                )
+            except Exception:
+                pass
+
+        if cfg.get("jellyfin_url") and cfg.get("jellyfin_api_key") and cfg.get("jellyfin_notify", "true") == "true":
+            try:
+                await client.post(
+                    f"{cfg['jellyfin_url'].rstrip('/')}/Library/Refresh",
+                    headers={"X-Emby-Token": cfg["jellyfin_api_key"]}
+                )
+            except Exception:
+                pass
+
+        if cfg.get("emby_url") and cfg.get("emby_api_key") and cfg.get("emby_notify", "true") == "true":
+            try:
+                await client.post(
+                    f"{cfg['emby_url'].rstrip('/')}/Library/Refresh",
+                    headers={"X-Emby-Token": cfg["emby_api_key"]}
+                )
+            except Exception:
+                pass
+
 
 def transfer_file(src: Path, dst: Path, mode: str):
     dst.parent.mkdir(parents=True, exist_ok=True)

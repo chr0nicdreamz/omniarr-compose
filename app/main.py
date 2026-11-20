@@ -188,6 +188,8 @@ async def update_settings(request: Request, db: Session = Depends(get_db)):
     if section == "connect":
         updates.setdefault("plex_notify_grab", "false")
         updates.setdefault("plex_notify_import", "false")
+        updates.setdefault("jellyfin_notify", "false")
+        updates.setdefault("emby_notify", "false")
     save_settings(db, updates)
     return RedirectResponse(url=f"/?tab={section}&msg=Settings+saved", status_code=303)
 
@@ -302,16 +304,30 @@ async def test_connection(service: str, db: Session = Depends(get_db)):
                 r.raise_for_status()
                 return {"ok": True, "detail": f"Connected to Prowlarr v{r.json().get('version', '?')}"}
             elif service == "qbittorrent":
-                r = await client.post(f"{cfg['qbit_url'].rstrip('/')}/api/v2/auth/login", data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]})
-                if r.text.strip() != "Ok.":
-                    return {"ok": False, "detail": f"Login failed: {r.text}"}
-                ver = await client.get(f"{cfg['qbit_url'].rstrip('/')}/api/v2/app/version")
+                q_url = cfg['qbit_url'].rstrip('/')
+                q_headers = {"Referer": q_url, "Origin": q_url}
+                ver_bypass = await client.get(f"{q_url}/api/v2/app/version", headers=q_headers)
+                if ver_bypass.status_code == 200:
+                    return {"ok": True, "detail": f"Connected to qBittorrent {ver_bypass.text.strip()} (Subnet Auth Bypass)"}
+                r = await client.post(f"{q_url}/api/v2/auth/login", data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]}, headers=q_headers)
+                if r.status_code != 200 or r.text.strip() != "Ok.":
+                    return {"ok": False, "detail": f"HTTP {r.status_code}: {r.text.strip() or 'Rejected'}"}
+                ver = await client.get(f"{q_url}/api/v2/app/version", headers=q_headers)
                 return {"ok": True, "detail": f"Connected to qBittorrent {ver.text.strip()}"}
             elif service == "plex":
-                r = await client.get(f"{cfg['plex_url'].rstrip('/')}/", params={"X-Plex-Token": cfg["plex_token"]}, headers={"Accept": "application/json"})
+                r = await client.get(f"{cfg['plex_url'].rstrip('/')}/identity", params={"X-Plex-Token": cfg["plex_token"]}, headers={"Accept": "application/json"})
                 r.raise_for_status()
-                name = r.json().get("MediaContainer", {}).get("friendlyName", "Plex")
-                return {"ok": True, "detail": f"Connected to {name}"}
+                return {"ok": True, "detail": "Connected to Plex Media Server"}
+            elif service == "jellyfin":
+                r = await client.get(f"{cfg['jellyfin_url'].rstrip('/')}/System/Info", headers={"X-Emby-Token": cfg["jellyfin_api_key"]})
+                r.raise_for_status()
+                info = r.json()
+                return {"ok": True, "detail": f"Connected to Jellyfin {info.get('Version', '')} ({info.get('ServerName', 'Server')})"}
+            elif service == "emby":
+                r = await client.get(f"{cfg['emby_url'].rstrip('/')}/System/Info", headers={"X-Emby-Token": cfg["emby_api_key"]})
+                r.raise_for_status()
+                info = r.json()
+                return {"ok": True, "detail": f"Connected to Emby {info.get('Version', '')} ({info.get('ServerName', 'Server')})"}
     except Exception as e:
         return {"ok": False, "detail": str(e)}
     return {"ok": False, "detail": "Unknown service"}
