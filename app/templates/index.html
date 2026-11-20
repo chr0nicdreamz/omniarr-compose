@@ -369,7 +369,7 @@
                     <label class="block text-xs text-slate-400 mb-1">File Transfer Mode</label>
                     <select name="import_mode" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
                         <option value="hardlink" {{ 'selected' if cfg.import_mode == 'hardlink' }}>Hardlink (Fallback to Copy across drives)</option>
-                        <option value="copy" {{ 'selected' if cfg.import_mode == 'copy' }}>Copy (Keep seed intact on plex_e)</option>
+                        <option value="copy" {{ 'selected' if cfg.import_mode == 'copy' }}>Copy (Keep seed intact on download drive)</option>
                         <option value="move" {{ 'selected' if cfg.import_mode == 'move' }}>Move (Remove source after transfer)</option>
                     </select>
                 </div>
