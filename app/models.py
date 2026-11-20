@@ -65,3 +65,14 @@ class IndexerConfig(Base):
     implementation = Column(String, default="Cardigann")
     enabled = Column(Boolean, default=True)
     priority = Column(Integer, default=25)
+
+
+class BlacklistedRelease(Base):
+    __tablename__ = "blacklisted_releases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    media_item_id = Column(Integer, index=True, nullable=True)
+    torrent_hash = Column(String, index=True, default="")
+    release_title = Column(String, index=True, default="")
+    reason = Column(String, default="Failed or stalled")
+    created_at = Column(DateTime, default=datetime.utcnow)

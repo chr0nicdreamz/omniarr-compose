@@ -1,3 +1,6 @@
+from fastapi.responses import FileResponse
+import tempfile
+import sqlite3
 import secrets
 from pathlib import Path
 import shutil
@@ -13,9 +16,9 @@ from sqlalchemy.orm import Session
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from .database import engine, Base, get_db, SessionLocal
-from .models import MediaItem, EpisodeItem, IndexerConfig, QualityProfile, CustomFormat
+from .models import MediaItem, EpisodeItem, IndexerConfig, BlacklistedRelease, QualityProfile, CustomFormat
 from .services import (
-    search_prowlarr, send_to_qbittorrent, check_downloads_and_import,
+    search_prowlarr, manual_search_prowlarr, send_to_qbittorrent, check_downloads_and_import,
     get_settings, save_settings, get_drive_stats, get_media_roots, sync_posters_from_plex
 )
 from .importer import parse_and_import_backup
@@ -44,6 +47,15 @@ async def scheduled_tasks():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        from .database import SessionLocal
+        _db = SessionLocal()
+        _cfg = get_settings(_db)
+        if not _cfg.get("omniarr_api_key") or _cfg.get("omniarr_api_key") == "change_me_to_a_secure_key":
+            save_settings(_db, {"omniarr_api_key": secrets.token_hex(16)})
+        _db.close()
+    except Exception:
+        pass
     scheduler = AsyncIOScheduler()
     scheduler.add_job(scheduled_tasks, "interval", minutes=2)
     import fcntl as _fcntl
@@ -56,6 +68,13 @@ async def lifespan(app: FastAPI):
     yield
     scheduler.shutdown()
 
+from .services import (
+    get_settings, save_settings, get_drive_stats, get_media_roots,
+    get_best_dest_dir, translate_qbit_path, transfer_file, trigger_plex_scan,
+    search_prowlarr, manual_search_prowlarr, send_to_qbittorrent,
+    check_downloads_and_import, sync_posters_from_plex, fetch_media_metadata, move_media_folder
+)
+
 app = FastAPI(title="OmniArr", lifespan=lifespan)
 
 def verify_api_key(x_api_key: str = Header(None), apikey: str = None, db: Session = Depends(get_db)):
@@ -64,6 +83,182 @@ def verify_api_key(x_api_key: str = Header(None), apikey: str = None, db: Sessio
     if key != cfg["omniarr_api_key"]:
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
+
+@app.get("/api/activity")
+async def api_get_activity(db: Session = Depends(get_db)):
+    cfg = get_settings(db)
+    qbit_url = cfg["qbit_url"].rstrip("/")
+    q_hdr = {"Referer": qbit_url, "Origin": qbit_url}
+    items_by_hash = {i.torrent_hash: i for i in db.query(MediaItem).filter(MediaItem.torrent_hash != None).all()}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(f"{qbit_url}/api/v2/auth/login", data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]}, headers=q_hdr)
+            resp = await client.get(f"{qbit_url}/api/v2/torrents/info", params={"category": cfg["qbit_category"]}, headers=q_hdr)
+            raw_list = resp.json() if resp.status_code == 200 else []
+    except Exception as e:
+        return {"error": str(e), "torrents": [], "blacklist": []}
+
+    torrents_out = []
+    for t in raw_list:
+        thash = t.get("hash", "")
+        linked = items_by_hash.get(thash)
+        torrents_out.append({
+            "hash": thash,
+            "name": t.get("name", ""),
+            "progress": round((t.get("progress", 0) or 0) * 100, 1),
+            "dlspeed_mb": round((t.get("dlspeed", 0) or 0) / (1024 * 1024), 2),
+            "eta": t.get("eta", 0),
+            "state": t.get("state", "unknown"),
+            "size_gb": round((t.get("size", 0) or 0) / (1024**3), 2),
+            "media_id": linked.id if linked else None,
+            "media_title": linked.title if linked else None,
+        })
+    recent_bl = db.query(BlacklistedRelease).order_by(BlacklistedRelease.id.desc()).limit(20).all()
+    bl_out = [{"id": b.id, "title": b.release_title, "reason": b.reason, "date": b.created_at.strftime("%Y-%m-%d %H:%M") if b.created_at else ""} for b in recent_bl]
+    return {"torrents": torrents_out, "blacklist": bl_out}
+
+
+@app.post("/api/activity/import")
+async def api_force_import_torrent(payload: dict, db: Session = Depends(get_db)):
+    try:
+        return await _do_force_import_torrent(payload, db)
+    except HTTPException as he:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=he.status_code, content={"ok": False, "detail": he.detail})
+    except Exception as e:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=500, content={"ok": False, "detail": f"{type(e).__name__}: {e}"})
+
+async def _do_force_import_torrent(payload: dict, db: Session):
+    thash = (payload.get("hash") or "").strip()
+    raw_mid = payload.get("media_id")
+    media_id = int(raw_mid) if str(raw_mid or "").strip().isdigit() else None
+    cfg = get_settings(db)
+    qbit_url = cfg["qbit_url"].rstrip("/")
+    q_hdr = {"Referer": qbit_url, "Origin": qbit_url}
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        await client.post(f"{qbit_url}/api/v2/auth/login", data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]}, headers=q_hdr)
+        resp = await client.get(f"{qbit_url}/api/v2/torrents/info", params={"hashes": thash} if thash else {"category": cfg["qbit_category"]}, headers=q_hdr)
+        torrents = resp.json() if resp.status_code == 200 else []
+
+    target_t = None
+    if thash:
+        target_t = next((t for t in torrents if t.get("hash") == thash), None)
+    elif media_id:
+        item = db.query(MediaItem).filter_by(id=int(media_id)).first()
+        if item and item.torrent_hash:
+            target_t = next((t for t in torrents if t.get("hash") == item.torrent_hash), None)
+
+    if not target_t:
+        raise HTTPException(status_code=404, detail="Torrent not found in qBittorrent")
+
+    item = db.query(MediaItem).filter_by(id=int(media_id)).first() if media_id else db.query(MediaItem).filter_by(torrent_hash=target_t["hash"]).first()
+    if not item:
+        raise HTTPException(status_code=400, detail="Torrent is not linked to a library item. Use Manual Import Scanner below to pick the title.")
+
+    content_path = translate_qbit_path(target_t["content_path"], cfg)
+    if not content_path.exists():
+        raise HTTPException(status_code=400, detail=f"Path not found on disk: {content_path}")
+
+    fmt_key = f"{item.media_type}_folder_format"
+    template = cfg.get(fmt_key, "{Title} ({Year})")
+    folder_name = template.replace("{Title}", item.title).replace("{Year}", str(item.year or "")).replace("()", "").strip()
+    clean_name = re.sub(r'[\\/*?:"<>|]', "", folder_name)
+    target_base = get_best_dest_dir(item.media_type, cfg, db) / clean_name
+    mode = cfg.get("import_mode", "hardlink")
+
+    imported_files = 0
+    if content_path.is_file():
+        transfer_file(content_path, target_base / content_path.name, mode)
+        imported_files = 1
+    elif content_path.is_dir():
+        for root, _, files in os.walk(content_path):
+            for f in files:
+                if f.lower().endswith((".mkv", ".mp4", ".avi", ".m4v", ".flac", ".mp3", ".m4a")) and "sample" not in f.lower():
+                    transfer_file(Path(root) / f, target_base / f, mode)
+                    imported_files += 1
+
+    if imported_files == 0:
+        raise HTTPException(status_code=400, detail="No media files found inside torrent directory")
+
+    item.status = "available"
+    item.file_path = str(target_base)
+    db.commit()
+
+    if cfg.get("plex_notify_import", "true") == "true":
+        await trigger_plex_scan(cfg)
+    return {"ok": True, "files": imported_files, "dest": str(target_base)}
+
+@app.post("/api/activity/blacklist")
+async def api_blacklist_torrent(payload: dict, db: Session = Depends(get_db)):
+    thash = payload.get("hash", "").strip()
+    tname = payload.get("name", "").strip()
+    media_id = payload.get("media_id")
+    cfg = get_settings(db)
+    qbit_url = cfg["qbit_url"].rstrip("/")
+    q_hdr = {"Referer": qbit_url, "Origin": qbit_url}
+    if thash:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(f"{qbit_url}/api/v2/auth/login", data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]}, headers=q_hdr)
+                await client.post(f"{qbit_url}/api/v2/torrents/delete", data={"hashes": thash, "deleteFiles": "true"}, headers=q_hdr)
+        except Exception:
+            pass
+    db.add(BlacklistedRelease(media_item_id=media_id, torrent_hash=thash, release_title=tname, reason="Manual blacklist & retry"))
+    if media_id:
+        item = db.query(MediaItem).filter_by(id=int(media_id)).first()
+        if item:
+            item.torrent_hash = None
+            item.status = "wanted"
+    db.commit()
+    return {"ok": True}
+
+@app.get("/api/manual-import/scan")
+def api_scan_unmapped(db: Session = Depends(get_db)):
+    cfg = get_settings(db)
+    mount = Path(cfg.get("qbit_local_mount", "/downloads"))
+    if not mount.exists():
+        return {"files": [], "media": []}
+    exts = (".mkv", ".mp4", ".avi", ".m4v")
+    found = []
+    for root, _, files in os.walk(mount):
+        for f in files:
+            if f.lower().endswith(exts) and "sample" not in f.lower():
+                p = Path(root) / f
+                try:
+                    sz = round(p.stat().st_size / (1024**3), 2)
+                except OSError:
+                    sz = 0
+                if sz >= 0.05:
+                    found.append({"path": str(p), "name": f, "size_gb": sz})
+        if len(found) >= 100:
+            break
+    media_list = [{"id": i.id, "title": f"{i.title} ({i.year})" if i.year else i.title, "media_type": i.media_type} for i in db.query(MediaItem).order_by(MediaItem.title.asc()).all()]
+    return {"files": found[:100], "media": media_list}
+
+@app.post("/api/manual-import/run")
+async def api_run_manual_import(payload: dict, db: Session = Depends(get_db)):
+    src_str = payload.get("file_path", "").strip()
+    media_id = int(payload.get("media_id", 0))
+    src = Path(src_str)
+    item = db.query(MediaItem).filter_by(id=media_id).first()
+    if not src.exists() or not item:
+        raise HTTPException(status_code=400, detail="Invalid source file or target media item")
+    cfg = get_settings(db)
+    fmt_key = f"{item.media_type}_folder_format"
+    template = cfg.get(fmt_key, "{Title} ({Year})")
+    folder_name = template.replace("{Title}", item.title).replace("{Year}", str(item.year or "")).replace("()", "").strip()
+    clean_name = re.sub(r'[\/*?:"<>|]', "", folder_name)
+    target_base = get_best_dest_dir(item.media_type, cfg, db) / clean_name
+    transfer_file(src, target_base / src.name, cfg.get("import_mode", "hardlink"))
+    item.status = "available"
+    item.file_path = str(target_base)
+    db.commit()
+    if cfg.get("plex_notify_import", "true") == "true":
+        await trigger_plex_scan(cfg)
+    return {"ok": True, "dest": str(target_base / src.name)}
+
 # --- WEB UI ROUTES ---
 
 @app.post("/api/settings/rotate-key")
@@ -71,6 +266,82 @@ def rotate_omniarr_api_key(db: Session = Depends(get_db)):
     new_key = secrets.token_hex(16)
     save_settings(db, {"omniarr_api_key": new_key})
     return RedirectResponse(url="/?tab=connect&msg=OmniArr+API+Key+rotated+successfully", status_code=303)
+
+_HEALTH_CACHE = {"ts": 0.0, "data": None}
+
+@app.get("/api/health")
+async def service_health(force: bool = False, db: Session = Depends(get_db)):
+    import time as _t
+    now = _t.time()
+    if not force and _HEALTH_CACHE["data"] and (now - _HEALTH_CACHE["ts"]) < 60:
+        return _HEALTH_CACHE["data"]
+    cfg = get_settings(db)
+    status = {
+        "prowlarr": {"ok": False, "configured": bool(cfg.get("prowlarr_api_key"))},
+        "qbittorrent": {"ok": False, "configured": bool(cfg.get("qbit_url"))},
+        "media": {"ok": False, "configured": bool(cfg.get("plex_token") or cfg.get("jellyfin_api_key") or cfg.get("emby_api_key")), "label": "Media"}
+    }
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            if status["prowlarr"]["configured"]:
+                try:
+                    r = await client.get(f"{cfg['prowlarr_url'].rstrip('/')}/api/v1/system/status", headers={"X-Api-Key": cfg["prowlarr_api_key"]})
+                    status["prowlarr"]["ok"] = (r.status_code == 200)
+                except Exception:
+                    pass
+            if status["qbittorrent"]["configured"]:
+                try:
+                    q_url = cfg["qbit_url"].rstrip("/")
+                    q_hdr = {"Referer": q_url, "Origin": q_url}
+                    r = await client.get(f"{q_url}/api/v2/app/version", headers=q_hdr)
+                    if r.status_code == 200:
+                        status["qbittorrent"]["ok"] = True
+                    else:
+                        lr = await client.post(f"{q_url}/api/v2/auth/login", data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]}, headers=q_hdr)
+                        status["qbittorrent"]["ok"] = (lr.status_code == 200 and lr.text.strip() == "Ok.")
+                except Exception:
+                    pass
+            if cfg.get("plex_token"):
+                status["media"]["label"] = "Plex"
+                try:
+                    r = await client.get(f"{cfg['plex_url'].rstrip('/')}/identity", params={"X-Plex-Token": cfg["plex_token"]}, headers={"Accept": "application/json"})
+                    status["media"]["ok"] = (r.status_code == 200)
+                except Exception:
+                    pass
+            elif cfg.get("jellyfin_api_key"):
+                status["media"]["label"] = "Jellyfin"
+                try:
+                    r = await client.get(f"{cfg['jellyfin_url'].rstrip('/')}/System/Info", headers={"X-Emby-Token": cfg["jellyfin_api_key"]})
+                    status["media"]["ok"] = (r.status_code == 200)
+                except Exception:
+                    pass
+            elif cfg.get("emby_api_key"):
+                status["media"]["label"] = "Emby"
+                try:
+                    r = await client.get(f"{cfg['emby_url'].rstrip('/')}/System/Info", headers={"X-Emby-Token": cfg["emby_api_key"]})
+                    status["media"]["ok"] = (r.status_code == 200)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    _HEALTH_CACHE["ts"] = now
+    _HEALTH_CACHE["data"] = status
+    return status
+
+@app.get("/api/settings/backup")
+def download_db_backup():
+    db_file = Path("/app/config/omniarr.db")
+    if not db_file.exists():
+        db_file = Path("omniarr.db")
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    tmp.close()
+    src = sqlite3.connect(str(db_file))
+    dst = sqlite3.connect(tmp.name)
+    with dst:
+        src.backup(dst)
+    dst.close()
+    src.close()
+    return FileResponse(tmp.name, filename="omniarr-backup.db", media_type="application/octet-stream")
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", q: str = "", media_type: str = "", page: int = 1, msg: str = "", db: Session = Depends(get_db)):
@@ -191,6 +462,70 @@ async def add_media(
 
     await sync_posters_from_plex(db)
     return RedirectResponse(url="/", status_code=303)
+
+
+
+@app.post("/api/media/{item_id}/move")
+async def api_move_media_folder(item_id: int, payload: dict, db: Session = Depends(get_db)):
+    from fastapi.responses import JSONResponse
+    item = db.query(MediaItem).filter_by(id=item_id).first()
+    if not item:
+        return JSONResponse(status_code=404, content={"ok": False, "detail": "Media item not found"})
+    new_root = (payload.get("new_root") or "").strip()
+    transfer_files = bool(payload.get("transfer_files", True))
+    try:
+        res = move_media_folder(item, new_root, transfer_files, db)
+        cfg = get_settings(db)
+        if cfg.get("plex_notify_import", "true") == "true":
+            await trigger_plex_scan(cfg)
+        return res
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"ok": False, "detail": str(e)})
+
+@app.get("/media/{item_id}", response_class=HTMLResponse)
+async def media_detail_page(request: Request, item_id: int, db: Session = Depends(get_db)):
+    item = db.query(MediaItem).filter_by(id=item_id).first()
+    if not item:
+        return RedirectResponse(url="/?msg=Media+item+not+found", status_code=303)
+    cfg = get_settings(db)
+    meta = await fetch_media_metadata(item, cfg)
+    episodes = db.query(EpisodeItem).filter_by(media_item_id=item.id).order_by(EpisodeItem.season_number.asc(), EpisodeItem.episode_number.asc()).all()
+    roots_map = get_media_roots(db)
+    available_roots = [str(p) for p in roots_map.get(item.media_type, []) if str(p)]
+    return templates.TemplateResponse("detail.html", {
+        "request": request,
+        "item": item,
+        "meta": meta,
+        "episodes": episodes,
+        "cfg": cfg,
+        "available_roots": available_roots,
+    })
+
+@app.get("/api/search/manual/{item_id}")
+async def api_manual_search(item_id: int, q: str = "", db: Session = Depends(get_db)):
+    item = db.query(MediaItem).filter_by(id=item_id).first()
+    if not item:
+        return {"item_id": item_id, "error": "Item not found", "releases": []}
+    search_q = q.strip() or (f"{item.title} {item.year}" if item.year and item.media_type == "movie" else item.title)
+    try:
+        releases = await manual_search_prowlarr(search_q, item.media_type, item.quality_profile, db)
+        return {"item_id": item.id, "title": item.title, "query": search_q, "releases": releases}
+    except Exception as e:
+        return {"item_id": item.id, "title": item.title, "query": search_q, "error": f"{type(e).__name__}: {e}", "releases": []}
+
+@app.post("/api/grab/manual")
+async def api_manual_grab(payload: dict, db: Session = Depends(get_db)):
+    item_id = int(payload.get("item_id", 0))
+    dl_url = payload.get("download_url", "").strip()
+    item = db.query(MediaItem).filter_by(id=item_id).first()
+    if not item or not dl_url:
+        raise HTTPException(status_code=400, detail="Missing item_id or download_url")
+    thash = await send_to_qbittorrent(dl_url, item.id, db)
+    if thash:
+        item.torrent_hash = thash
+    item.status = "downloading"
+    db.commit()
+    return {"ok": True, "hash": thash}
 
 @app.post("/search/{item_id}")
 async def search_upgrade_media(item_id: int, db: Session = Depends(get_db)):

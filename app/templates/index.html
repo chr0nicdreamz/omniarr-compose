@@ -18,6 +18,13 @@
                 <p class="text-xs text-slate-400">Unified Sonarr • Radarr • Lidarr • Prowlarr Engine</p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
+                <div id="health-pills" class="flex items-center gap-1.5 mr-1 text-[11px] bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg">
+                    <span class="inline-flex items-center gap-1 text-slate-400"><span id="dot-prowlarr" class="w-2 h-2 rounded-full bg-slate-600"></span>Prowlarr</span>
+                    <span class="text-slate-700">•</span>
+                    <span class="inline-flex items-center gap-1 text-slate-400"><span id="dot-qbit" class="w-2 h-2 rounded-full bg-slate-600"></span>qBit</span>
+                    <span class="text-slate-700">•</span>
+                    <span class="inline-flex items-center gap-1 text-slate-400"><span id="dot-media" class="w-2 h-2 rounded-full bg-slate-600"></span><span id="lbl-media">Media</span></span>
+                </div>
                 <form action="/sync-posters" method="post">
                     <button type="submit" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium text-emerald-300">
                         🖼 Sync Plex Posters
@@ -38,6 +45,24 @@
         </div>
         {% endif %}
 
+        {% if not cfg.prowlarr_api_key %}
+        <div id="onboarding-banner" class="mb-5 bg-indigo-950/50 border border-indigo-500/40 rounded-xl p-4 text-xs text-slate-200 flex flex-wrap justify-between items-center gap-4">
+            <div>
+                <div class="font-semibold text-indigo-300 text-sm mb-1">Welcome to OmniArr — Quick Setup Checklist</div>
+                <div class="flex flex-wrap gap-3 text-slate-300">
+                    <a href="/?tab=media" class="underline hover:text-white">1. Set Media Root Folders</a>
+                    <span>→</span>
+                    <a href="/?tab=connect" class="underline hover:text-white">2. Add Prowlarr &amp; qBittorrent</a>
+                    <span>→</span>
+                    <a href="/?tab=connect" class="underline hover:text-white">3. Connect Plex/Jellyfin/Emby</a>
+                    <span>→</span>
+                    <a href="/?tab=connect" class="underline hover:text-white">4. Copy API Key to Seerr</a>
+                </div>
+            </div>
+            <button type="button" onclick="document.getElementById('onboarding-banner').remove()" class="text-slate-400 hover:text-white underline">Dismiss</button>
+        </div>
+        {% endif %}
+
         {% set movie_items = items | selectattr('media_type', 'equalto', 'movie') | list %}
         {% set tv_items = items | selectattr('media_type', 'equalto', 'tv') | list %}
         {% set music_items = items | selectattr('media_type', 'equalto', 'music') | list %}
@@ -46,6 +71,7 @@
         <nav class="flex flex-wrap gap-1.5 mb-6 bg-slate-900 p-1.5 rounded-lg border border-slate-800 text-xs font-medium">
             {% set tabs = [
                 ('library', 'Library (Movies: ' ~ movie_items|length ~ ' • TV: ' ~ tv_items|length ~ ')'),
+                ('activity', 'Activity & Manual Import'),
                 ('media', 'Media Management'),
                 ('profiles', 'Profiles & Custom Formats'),
                 ('indexers', 'Indexers (' ~ indexers|length ~ ')'),
@@ -93,7 +119,9 @@
                     <div>
                         <div class="flex items-start justify-between gap-2">
                             <h4 class="font-semibold text-sm sm:text-base text-slate-100 leading-snug">
-                                {{ item.title }} {% if item.year %}<span class="text-slate-400 font-normal">({{ item.year }})</span>{% endif %}
+                                <a href="/media/{{ item.id }}" class="hover:text-indigo-400 transition">
+                                    {{ item.title }} {% if item.year %}<span class="text-slate-400 font-normal">({{ item.year }})</span>{% endif %}
+                                </a>
                             </h4>
                             <!-- Status Pill (List Mode) -->
                             <div class="list-badge hidden flex-shrink-0">
@@ -130,14 +158,28 @@
                         {% endif %}
                     </div>
 
-                    <!-- Action Buttons: Search/Upgrade + Remove -->
-                    <div class="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                        <form action="/search/{{ item.id }}" method="post">
-                            <button type="submit" title="Search Prowlarr for a new or upgraded release"
-                                    class="bg-slate-800 hover:bg-indigo-600 text-slate-200 hover:text-white border border-slate-700 hover:border-indigo-500 px-2.5 py-1 rounded text-xs font-medium transition">
-                                🔍 {{ 'Upgrade' if item.status == 'available' else 'Search' }}
+                    <!-- Action Buttons: Auto Search + Interactive Pick + Remove -->
+                    <div class="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-1.5">
+                        <div class="flex items-center gap-1.5">
+                            <form action="/search/{{ item.id }}" method="post">
+                                <button type="submit" title="Auto-grab best matching release"
+                                        class="bg-slate-800 hover:bg-indigo-600 text-slate-200 hover:text-white border border-slate-700 hover:border-indigo-500 px-2.5 py-1 rounded text-xs font-medium transition">
+                                    🔍 {{ 'Upgrade' if item.status == 'available' else 'Auto' }}
+                                </button>
+                            </form>
+                            <button type="button" data-title="{{ item.title }}" onclick="openManualSearch({{ item.id }}, this.dataset.title)"
+                                    title="Browse all Prowlarr releases and pick manually"
+                                    class="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded text-xs font-medium transition">
+                                📋 Pick
                             </button>
-                        </form>
+                            {% if item.status == 'downloading' %}
+                            <button type="button" onclick="forceImportCard(this, {{ item.id }})"
+                                    title="Import completed torrent into library now"
+                                    class="bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 px-2 py-1 rounded text-xs font-medium transition">
+                                ⬇ Import
+                            </button>
+                            {% endif %}
+                        </div>
                         <form action="/delete/{{ item.id }}" method="post">
                             <button type="submit" class="text-rose-400 hover:text-rose-300 text-xs px-1.5 py-1">
                                 Remove
@@ -516,6 +558,10 @@
                         <input type="number" name="min_seeders" value="{{ cfg.min_seeders }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
                     </div>
                     <div>
+                        <label class="block text-xs text-slate-400 mb-1">Minimum Release Size (GB)</label>
+                        <input type="number" step="0.1" name="min_size_gb" value="{{ cfg.min_size_gb or 0 }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                    </div>
+                    <div>
                         <label class="block text-xs text-slate-400 mb-1">Maximum Release Size (GB)</label>
                         <input type="number" step="0.5" name="max_size_gb" value="{{ cfg.max_size_gb }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
                     </div>
@@ -601,6 +647,39 @@
                 </div>
                 {% if indexers %}<button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save Indexer States</button>{% endif %}
             </form>
+        </div>
+        {% endif %}
+
+
+        <!-- TAB: ACTIVITY & MANUAL IMPORT -->
+        {% if active_tab == 'activity' %}
+        <div class="space-y-6">
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+                    <div>
+                        <h2 class="text-lg font-semibold text-indigo-300">Live qBittorrent Activity Queue</h2>
+                        <p class="text-xs text-slate-400">Active &amp; completed torrents in category <span class="font-mono text-slate-300">{{ cfg.qbit_category }}</span></p>
+                    </div>
+                    <button type="button" onclick="loadActivityTab()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium">↻ Refresh Queue</button>
+                </div>
+                <div id="activity-queue-box" class="text-xs text-slate-400">Loading qBittorrent queue...</div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+                    <div>
+                        <h2 class="text-lg font-semibold text-indigo-300">Manual Import Scanner</h2>
+                        <p class="text-xs text-slate-400">Scan <span class="font-mono text-slate-300">{{ cfg.qbit_local_mount }}</span> for video files and map them to any library item</p>
+                    </div>
+                    <button type="button" onclick="loadManualImportFiles()" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded text-xs font-medium text-white">Scan Download Mount</button>
+                </div>
+                <div id="manual-import-box" class="text-xs text-slate-400">Click <strong>Scan Download Mount</strong> to list files available for manual import.</div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
+                <h2 class="text-base font-semibold text-rose-300 border-b border-slate-800 pb-2 mb-3">Recently Blacklisted Releases</h2>
+                <div id="blacklist-box" class="text-xs text-slate-400">Loading blacklist history...</div>
+            </div>
         </div>
         {% endif %}
 
@@ -752,6 +831,16 @@
                                 class="bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 px-3 py-2 rounded text-xs font-medium whitespace-nowrap">↻ Rotate Key</button>
                     </div>
                     <p class="text-[11px] text-slate-500 mt-1.5">Paste your own custom key and click Save below, or click <strong>↻ Rotate Key</strong> to generate a new 32-character token immediately.</p>
+                    <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-slate-800/80">
+                        <button type="button" onclick="copySeerrBundle(this)"
+                                class="bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 px-3 py-1.5 rounded text-xs font-medium">
+                            📋 Copy Seerr Connection Info
+                        </button>
+                        <a href="/api/settings/backup"
+                           class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs font-medium">
+                            💾 Download Database Backup (.db)
+                        </a>
+                    </div>
                 </div>
             </div>
 
@@ -762,6 +851,35 @@
 
     <script>
         function toggleSecret(id) { const el = document.getElementById(id); if (el) el.type = (el.type === 'password') ? 'text' : 'password'; }
+        function copySeerrBundle(btn) {
+            const key = document.getElementById('omniarr-api-key-input').value;
+            const info = `Host: ${window.location.hostname}\nPort: ${window.location.port || '8585'}\nSSL: Off\nAPI Key: ${key}`;
+            const ta = document.createElement('textarea');
+            ta.value = info;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            btn.textContent = '✓ Copied Seerr Info';
+            setTimeout(() => btn.textContent = '📋 Copy Seerr Connection Info', 1800);
+        }
+        (async function loadHealth() {
+            try {
+                const res = await fetch('/api/health');
+                if (!res.ok) return;
+                const d = await res.json();
+                const setDot = (id, s) => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    el.className = 'w-2 h-2 rounded-full ' + (!s.configured ? 'bg-slate-600' : (s.ok ? 'bg-emerald-400' : 'bg-rose-500'));
+                };
+                setDot('dot-prowlarr', d.prowlarr);
+                setDot('dot-qbit', d.qbittorrent);
+                setDot('dot-media', d.media);
+                const lbl = document.getElementById('lbl-media');
+                if (lbl && d.media && d.media.label) lbl.textContent = d.media.label;
+            } catch (e) {}
+        })();
         async function toggleEpisodes(mediaId) {
             const box = document.getElementById(`eps-${mediaId}`);
             if (!box) return;
@@ -965,6 +1083,276 @@
                 }
             }
             listEl.innerHTML = html;
+        }
+    </script>
+
+    <!-- Interactive Manual Search Modal -->
+    <div id="manual-search-modal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl">
+            <div class="p-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h3 id="ms-modal-title" class="text-base font-semibold text-indigo-300">Manual Release Search</h3>
+                    <p class="text-[11px] text-slate-400">Sorted by OmniArr Score (Seeders + Custom Formats + Preferred Keywords)</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input id="ms-custom-query" type="text" placeholder="Custom search override (e.g. S01E01)..."
+                           class="bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-xs text-slate-200 w-56">
+                    <button type="button" onclick="runManualSearchQuery()" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-xs font-medium">Search</button>
+                    <button type="button" onclick="closeManualSearch()" class="text-slate-400 hover:text-white text-sm px-2">✕</button>
+                </div>
+            </div>
+            <div id="ms-modal-body" class="p-4 overflow-y-auto flex-1 text-xs">
+                <div class="text-slate-400 text-center py-8">Querying Prowlarr indexers...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let _msCurrentItemId = null;
+        function closeManualSearch() {
+            document.getElementById('manual-search-modal').classList.add('hidden');
+        }
+        async function openManualSearch(itemId, title) {
+            _msCurrentItemId = itemId;
+            document.getElementById('ms-modal-title').textContent = `Releases: ${title}`;
+            document.getElementById('ms-custom-query').value = '';
+            document.getElementById('manual-search-modal').classList.remove('hidden');
+            await runManualSearchQuery();
+        }
+        async function runManualSearchQuery() {
+            const body = document.getElementById('ms-modal-body');
+            const q = document.getElementById('ms-custom-query').value.trim();
+            body.innerHTML = '<div class="text-slate-400 text-center py-8">Querying Prowlarr indexers...</div>';
+            try {
+                const res = await fetch(`/api/search/manual/${_msCurrentItemId}?q=${encodeURIComponent(q)}`);
+                const data = await res.json();
+                if (data.error) {
+                    body.innerHTML = `<div class="text-rose-400 text-center py-8">Prowlarr error: ${data.error}</div>`;
+                    return;
+                }
+                if (!data.releases || data.releases.length === 0) {
+                    body.innerHTML = '<div class="text-slate-400 text-center py-8">No releases returned by Prowlarr. Try a custom search override above.</div>';
+                    return;
+                }
+                let rows = data.releases.map((r, idx) => {
+                    const warnHtml = (r.warnings && r.warnings.length)
+                        ? `<span class="ml-1.5 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px]">${r.warnings.join(', ')}</span>`
+                        : '';
+                    return `<tr class="border-b border-slate-800/80 hover:bg-slate-800/40">
+                        <td class="py-2 pr-2 font-mono text-[11px] text-slate-200 break-all">${r.title}${warnHtml}</td>
+                        <td class="py-2 px-2 text-slate-400 whitespace-nowrap">${r.indexer}</td>
+                        <td class="py-2 px-2 text-slate-300 whitespace-nowrap">${r.size_gb} GB</td>
+                        <td class="py-2 px-2 text-emerald-400 whitespace-nowrap">${r.seeders} / ${r.peers}</td>
+                        <td class="py-2 px-2 text-indigo-300 font-semibold whitespace-nowrap">${r.score}</td>
+                        <td class="py-2 pl-2 text-right whitespace-nowrap">
+                            <button type="button" onclick="grabManualRelease(this, ${idx})"
+                                    class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded text-[11px] font-medium">Grab</button>
+                        </td>
+                    </tr>`;
+                }).join('');
+                window._msLastReleases = data.releases;
+                body.innerHTML = `<table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b border-slate-700 text-slate-400 text-[11px]">
+                            <th class="pb-2">Release</th>
+                            <th class="pb-2 px-2">Indexer</th>
+                            <th class="pb-2 px-2">Size</th>
+                            <th class="pb-2 px-2">Seed/Peer</th>
+                            <th class="pb-2 px-2">Score</th>
+                            <th class="pb-2 pl-2 text-right">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>`;
+            } catch (err) {
+                body.innerHTML = `<div class="text-rose-400 text-center py-8">Search failed: ${err}</div>`;
+            }
+        }
+        async function grabManualRelease(btn, idx) {
+            const rel = window._msLastReleases[idx];
+            if (!rel) return;
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+            try {
+                const res = await fetch('/api/grab/manual', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({item_id: _msCurrentItemId, download_url: rel.download_url})
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    btn.className = 'bg-emerald-600 text-white px-2.5 py-1 rounded text-[11px] font-medium';
+                    btn.textContent = '✓ Grabbed';
+                } else {
+                    btn.textContent = 'Failed';
+                }
+            } catch (e) {
+                btn.textContent = 'Error';
+            }
+        }
+
+        async function loadActivityTab() {
+            const box = document.getElementById('activity-queue-box');
+            const blBox = document.getElementById('blacklist-box');
+            if (!box) return;
+            try {
+                const res = await fetch('/api/activity');
+                const data = await res.json();
+                if (data.error) {
+                    box.innerHTML = `<div class="text-rose-400">qBittorrent error: ${data.error}</div>`;
+                    return;
+                }
+                if (!data.torrents || data.torrents.length === 0) {
+                    box.innerHTML = '<div class="text-slate-400 py-4">No active torrents in OmniArr category.</div>';
+                } else {
+                    const rows = data.torrents.map(t => `
+                        <tr class="border-b border-slate-800/80">
+                            <td class="py-2.5 pr-3">
+                                <div class="font-mono text-slate-200 break-all">${t.name}</div>
+                                ${t.media_title ? `<div class="text-[11px] mt-0.5"><a href="/media/${t.media_id}" class="text-indigo-400 hover:text-indigo-300 underline">Linked: ${t.media_title} →</a></div>` : ''}
+                            </td>
+                            <td class="py-2.5 px-2 whitespace-nowrap text-slate-300">${t.size_gb} GB</td>
+                            <td class="py-2.5 px-2 whitespace-nowrap">
+                                <div class="w-28 bg-slate-800 rounded-full h-2 overflow-hidden">
+                                    <div class="bg-indigo-500 h-2" style="width:${t.progress}%"></div>
+                                </div>
+                                <div class="text-[10px] text-slate-400 mt-0.5">${t.progress}% • ${t.dlspeed_mb} MB/s</div>
+                            </td>
+                            <td class="py-2.5 px-2 whitespace-nowrap">
+                                <span class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">${t.state}</span>
+                            </td>
+                            <td class="py-2.5 pl-2 text-right whitespace-nowrap space-x-1">
+                                <button type="button" data-hash="${t.hash}" data-mid="${t.media_id || ''}"
+                                        onclick="forceImportTorrent(this)"
+                                        class="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 px-2.5 py-1 rounded text-[11px]">
+                                    ⬇ Force Import
+                                </button>
+                                <button type="button" data-hash="${t.hash}" data-name="${t.name}" data-mid="${t.media_id || ''}"
+                                        onclick="blacklistTorrent(this)"
+                                        class="bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-300 px-2.5 py-1 rounded text-[11px]">
+                                    Blacklist &amp; Retry
+                                </button>
+                            </td>
+                        </tr>`).join('');
+                    box.innerHTML = `<table class="w-full text-left border-collapse">
+                        <thead><tr class="border-b border-slate-700 text-slate-400 text-[11px]">
+                            <th class="pb-2">Torrent</th><th class="pb-2 px-2">Size</th><th class="pb-2 px-2">Progress</th><th class="pb-2 px-2">State</th><th class="pb-2 pl-2 text-right">Action</th>
+                        </tr></thead><tbody>${rows}</tbody></table>`;
+                }
+                if (blBox) {
+                    if (!data.blacklist || data.blacklist.length === 0) {
+                        blBox.innerHTML = '<div class="text-slate-500">No blacklisted releases yet.</div>';
+                    } else {
+                        blBox.innerHTML = '<ul class="space-y-1.5">' + data.blacklist.map(b =>
+                            `<li class="flex justify-between bg-slate-800/50 px-3 py-1.5 rounded"><span class="font-mono text-slate-300 truncate pr-3">${b.title}</span><span class="text-slate-500 whitespace-nowrap">${b.reason} • ${b.date}</span></li>`
+                        ).join('') + '</ul>';
+                    }
+                }
+            } catch (e) {
+                box.innerHTML = `<div class="text-rose-400">Failed to load activity: ${e}</div>`;
+            }
+        }
+        async function forceImportTorrent(btn) {
+            btn.disabled = true;
+            btn.textContent = 'Importing...';
+            try {
+                const res = await fetch('/api/activity/import', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({hash: btn.dataset.hash, media_id: btn.dataset.mid || null})
+                });
+                const data = await res.json();
+                if (res.ok && data.ok) {
+                    btn.textContent = '✓ Imported';
+                    setTimeout(loadActivityTab, 1000);
+                } else {
+                    alert(data.detail || 'Import failed. If unlinked, use the Manual Import Scanner below.');
+                    btn.disabled = false;
+                    btn.textContent = '⬇ Force Import';
+                }
+            } catch (e) {
+                alert('Error: ' + e);
+                btn.disabled = false;
+                btn.textContent = '⬇ Force Import';
+            }
+        }
+        async function forceImportCard(btn, mediaId) {
+            btn.disabled = true;
+            btn.textContent = 'Importing...';
+            try {
+                const res = await fetch('/api/activity/import', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({media_id: mediaId})
+                });
+                const data = await res.json();
+                if (res.ok && data.ok) {
+                    window.location.href = '/?msg=Imported+' + data.files + '+file(s)+successfully';
+                } else {
+                    alert(data.detail || 'Could not auto-import. Check Activity & Manual Import tab.');
+                    btn.disabled = false;
+                    btn.textContent = '⬇ Import';
+                }
+            } catch (e) {
+                alert('Error: ' + e);
+                btn.disabled = false;
+                btn.textContent = '⬇ Import';
+            }
+        }
+        async function blacklistTorrent(btn) {
+            if (!confirm('Remove this torrent from qBittorrent, blacklist it, and re-search for another release?')) return;
+            btn.disabled = true;
+            btn.textContent = 'Blacklisting...';
+            await fetch('/api/activity/blacklist', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({hash: btn.dataset.hash, name: btn.dataset.name, media_id: btn.dataset.mid || null})
+            });
+            loadActivityTab();
+        }
+        async function loadManualImportFiles() {
+            const box = document.getElementById('manual-import-box');
+            box.innerHTML = '<div class="text-slate-400 py-3">Scanning download mount...</div>';
+            const res = await fetch('/api/manual-import/scan');
+            const data = await res.json();
+            if (!data.files || data.files.length === 0) {
+                box.innerHTML = '<div class="text-slate-400 py-3">No video files found in download mount.</div>';
+                return;
+            }
+            const opts = data.media.map(m => `<option value="${m.id}">[${m.media_type.toUpperCase()}] ${m.title}</option>`).join('');
+            const rows = data.files.map((f, i) => `
+                <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-800/50 border border-slate-800 p-2.5 rounded mb-2">
+                    <div class="min-w-0 flex-1">
+                        <div class="font-mono text-slate-200 truncate">${f.name}</div>
+                        <div class="text-[11px] text-slate-500 truncate">${f.path} (${f.size_gb} GB)</div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <select id="mi-sel-${i}" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 max-w-[220px]">${opts}</select>
+                        <button type="button" data-path="${f.path}" onclick="runManualImport(this, ${i})"
+                                class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded text-xs font-medium">Import</button>
+                    </div>
+                </div>`).join('');
+            box.innerHTML = rows;
+        }
+        async function runManualImport(btn, idx) {
+            const sel = document.getElementById(`mi-sel-${idx}`);
+            btn.disabled = true;
+            btn.textContent = 'Importing...';
+            const res = await fetch('/api/manual-import/run', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({file_path: btn.dataset.path, media_id: sel.value})
+            });
+            if (res.ok) {
+                btn.className = 'bg-slate-700 text-emerald-300 px-3 py-1 rounded text-xs font-medium';
+                btn.textContent = '✓ Imported';
+            } else {
+                btn.textContent = 'Failed';
+            }
+        }
+        if (document.getElementById('activity-queue-box')) {
+            loadActivityTab();
+            setInterval(loadActivityTab, 10000);
         }
     </script>
 </body>

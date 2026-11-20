@@ -5,7 +5,7 @@ import httpx
 import re
 from pathlib import Path
 from sqlalchemy.orm import Session
-from .models import MediaItem, AppSetting, IndexerConfig, QualityProfile, CustomFormat
+from .models import EpisodeItem, MediaItem, AppSetting, IndexerConfig, BlacklistedRelease, QualityProfile, CustomFormat
 
 def _parse_roots(env_key: str, default_paths: list[str]) -> list[Path]:
     raw = os.getenv(env_key, "")
@@ -66,10 +66,12 @@ DEFAULT_SETTINGS = {
     "default_tv_quality": "1080p",
     "default_music_quality": "lossless",
     "min_seeders": "3",
+    "min_size_gb": "0",
     "max_size_gb": "40",
     "preferred_keywords": "REMUX, WEB-DL, BluRay, 10bit, Atmos, FLAC",
     "blocked_keywords": "CAM, HDCAM, TS, TELESYNC, TC, SCREENER, R5",
     "rss_sync_minutes": "2",
+    "stalled_timeout_minutes": "120",
 }
 
 QUALITY_KEYWORDS = {
@@ -124,13 +126,16 @@ def get_drive_stats(db: Session = None, force: bool = False) -> list:
     return sorted(drives, key=lambda d: d["mount"])
 
 def translate_qbit_path(remote_path: str, cfg: dict) -> Path:
-    normalized = remote_path.replace("\\", "/")
-    marker = cfg["qbit_remote_path"].strip("/")
-    if marker and marker.lower() in normalized.lower():
-        idx = normalized.lower().index(marker.lower()) + len(marker)
-        relative = normalized[idx:].lstrip("/")
-        return Path(cfg["qbit_local_mount"]) / relative
-    return Path(normalized)
+    norm_path = (remote_path or "").replace(chr(92), "/")
+    remote_prefix = (cfg.get("qbit_remote_path", "/downloads") or "").replace(chr(92), "/").rstrip("/")
+    local_prefix = (cfg.get("qbit_local_mount", "/downloads") or "/downloads").rstrip("/")
+    if remote_prefix and norm_path.lower().startswith(remote_prefix.lower()):
+        rel = norm_path[len(remote_prefix):].lstrip("/")
+        return Path(local_prefix) / rel
+    candidate = Path(local_prefix) / Path(norm_path).name
+    if candidate.exists():
+        return candidate
+    return Path(norm_path)
 
 def get_best_dest_dir(media_type: str, cfg: dict, db: Session = None) -> Path:
     min_free_bytes = float(cfg.get("min_free_space_gb", 20)) * (1024**3)
@@ -191,7 +196,11 @@ async def search_prowlarr(query: str, media_type: str, quality: str, db: Session
     disabled_indexers = {
         idx.name.lower() for idx in db.query(IndexerConfig).filter_by(enabled=False).all()
     }
+    blacklisted_titles = {
+        b.release_title.lower() for b in db.query(BlacklistedRelease).all() if b.release_title
+    }
     min_seeders = int(cfg.get("min_seeders", 1))
+    min_size_bytes = float(cfg.get("min_size_gb", 0)) * (1024**3)
     max_size_bytes = float(cfg.get("max_size_gb", 100)) * (1024**3)
     blocked = [k.strip().lower() for k in cfg.get("blocked_keywords", "").split(",") if k.strip()]
 
@@ -206,12 +215,16 @@ async def search_prowlarr(query: str, media_type: str, quality: str, db: Session
 
     scored_releases = []
     for r in results:
-        raw_title = r.get("title", "")
+        raw_title = r.get("title") or ""
         title_l = raw_title.lower()
         indexer_l = r.get("indexer", "").lower()
         if indexer_l in disabled_indexers:
             continue
+        if title_l in blacklisted_titles:
+            continue
         if r.get("seeders", 0) < min_seeders:
+            continue
+        if min_size_bytes > 0 and r.get("size", 0) < min_size_bytes:
             continue
         if max_size_bytes > 0 and r.get("size", 0) > max_size_bytes:
             continue
@@ -303,6 +316,61 @@ async def sync_posters_from_plex(db: Session) -> int:
         pass
     return updated
 
+
+async def manual_search_prowlarr(query: str, media_type: str, quality: str, db: Session) -> list[dict]:
+    """Returns all Prowlarr releases annotated with score and guardrail status for interactive picking."""
+    cfg = get_settings(db)
+    cat_map = {"movie": [2000], "tv": [5000], "music": [3000]}
+    params = {"query": query, "type": "search"}
+    for c in cat_map.get(media_type, []):
+        params.setdefault("categories", []).append(c)
+
+    headers = {"X-Api-Key": cfg["prowlarr_api_key"]}
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        resp = await client.get(f"{cfg['prowlarr_url'].rstrip('/')}/api/v1/search", params=params, headers=headers)
+        resp.raise_for_status()
+        results = resp.json()
+
+    min_seeders = int(cfg.get("min_seeders", 1))
+    min_size_bytes = float(cfg.get("min_size_gb", 0)) * (1024**3)
+    max_size_bytes = float(cfg.get("max_size_gb", 100)) * (1024**3)
+    blocked = [k.strip().lower() for k in cfg.get("blocked_keywords", "").split(",") if k.strip()]
+
+    annotated = []
+    for r in results:
+        raw_title = r.get("title") or ""
+        title_l = raw_title.lower()
+        size_b = r.get("size", 0) or 0
+        seeders = r.get("seeders", 0) or 0
+        reasons = []
+        if seeders < min_seeders:
+            reasons.append(f"Seeders < {min_seeders}")
+        if min_size_bytes > 0 and size_b < min_size_bytes:
+            reasons.append("Below min size")
+        if max_size_bytes > 0 and size_b > max_size_bytes:
+            reasons.append("Above max size")
+        if any(b in title_l for b in blocked):
+            reasons.append("Blocked keyword")
+
+        cf_score, _ = evaluate_custom_formats(raw_title, quality, db)
+        total_score = score_release(r, cfg, cf_score)
+        dl_url = r.get("downloadUrl") or r.get("magnetUrl") or ""
+        if not dl_url:
+            continue
+        annotated.append({
+            "title": raw_title,
+            "indexer": r.get("indexer") or "Unknown",
+            "size_gb": round(size_b / (1024**3), 2),
+            "seeders": seeders,
+            "peers": r.get("leechers", 0) or 0,
+            "score": total_score,
+            "cf_score": cf_score,
+            "download_url": dl_url,
+            "warnings": reasons,
+        })
+    annotated.sort(key=lambda x: x["score"], reverse=True)
+    return annotated[:75]
+
 async def send_to_qbittorrent(download_url: str, item_id: int, db: Session) -> str:
     cfg = get_settings(db)
     qbit_url = cfg["qbit_url"].rstrip("/")
@@ -389,10 +457,37 @@ async def check_downloads_and_import(db: Session):
     imported_any = False
     mode = cfg.get("import_mode", "hardlink")
 
+    import time as _t_now
+    stalled_limit_sec = int(cfg.get("stalled_timeout_minutes", 120)) * 60
+
     for item in downloading:
         t = torrents.get(item.torrent_hash)
         if not t:
             continue
+        t_state = t.get("state", "")
+        added_on = t.get("added_on", 0) or 0
+        is_errored = t_state in ("error", "missingFiles")
+        is_stalled_out = (t_state == "stalledDL" and stalled_limit_sec > 0 and added_on > 0 and (_t_now.time() - added_on) > stalled_limit_sec)
+
+        if is_errored or is_stalled_out:
+            reason = f"qBittorrent {t_state}"
+            db.add(BlacklistedRelease(
+                media_item_id=item.id,
+                torrent_hash=item.torrent_hash or "",
+                release_title=t.get("name", ""),
+                reason=reason
+            ))
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(f"{qbit_url}/api/v2/auth/login", data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]})
+                    await client.post(f"{qbit_url}/api/v2/torrents/delete", data={"hashes": item.torrent_hash, "deleteFiles": "true"})
+            except Exception:
+                pass
+            item.torrent_hash = None
+            item.status = "wanted"
+            db.commit()
+            continue
+
         if t.get("progress", 0) >= 1.0:
             content_path = translate_qbit_path(t["content_path"], cfg)
             fmt_key = f"{item.media_type}_folder_format"
@@ -424,3 +519,156 @@ async def check_downloads_and_import(db: Session):
         if cfg.get("plex_notify_import", "true") == "true":
             await trigger_plex_scan(cfg)
         await sync_posters_from_plex(db)
+
+
+async def fetch_media_metadata(item: MediaItem, cfg: dict) -> dict:
+    """Fetches synopsis, runtime, release date, rating, and studio from Plex (primary) or TVMaze/iTunes (fallback)."""
+    meta = {
+        "summary": "",
+        "runtime_min": None,
+        "release_date": str(item.year) if item.year else "",
+        "content_rating": "",
+        "rating": "",
+        "studio": "",
+        "backdrop_url": "",
+        "genres": [],
+    }
+    plex_url = cfg.get("plex_url", "").rstrip("/")
+    token = cfg.get("plex_token", "")
+    if plex_url and token:
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                r = await client.get(
+                    f"{plex_url}/library/search",
+                    params={"query": item.title, "X-Plex-Token": token},
+                    headers={"Accept": "application/json"},
+                )
+                if r.status_code == 200:
+                    hubs = r.json().get("MediaContainer", {}).get("SearchResult", [])
+                    for entry in hubs:
+                        md = entry.get("Metadata") or {}
+                        if md.get("title", "").lower() == item.title.lower() and (not item.year or md.get("year") == item.year or abs((md.get("year") or 0) - item.year) <= 1):
+                            meta["summary"] = md.get("summary") or ""
+                            if md.get("duration"):
+                                meta["runtime_min"] = max(1, round(int(md["duration"]) / 60000))
+                            meta["release_date"] = md.get("originallyAvailableAt") or meta["release_date"]
+                            meta["content_rating"] = md.get("contentRating") or ""
+                            meta["rating"] = str(md.get("audienceRating") or md.get("rating") or "")
+                            meta["studio"] = md.get("studio") or ""
+                            if md.get("art"):
+                                meta["backdrop_url"] = f"{plex_url}{md['art']}?X-Plex-Token={token}"
+                            meta["genres"] = [g.get("tag") for g in (md.get("Genre") or []) if g.get("tag")]
+                            if meta["summary"]:
+                                return meta
+        except Exception:
+            pass
+
+    # Fallback: TVMaze for TV shows, iTunes Search API for movies (no API key required)
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            if item.media_type == "tv":
+                r = await client.get("https://api.tvmaze.com/singlesearch/shows", params={"q": item.title})
+                if r.status_code == 200:
+                    d = r.json()
+                    raw_sum = d.get("summary") or ""
+                    meta["summary"] = re.sub(r"<[^>]+>", "", raw_sum).strip()
+                    meta["runtime_min"] = d.get("runtime") or d.get("averageRuntime")
+                    meta["release_date"] = d.get("premiered") or meta["release_date"]
+                    meta["rating"] = str((d.get("rating") or {}).get("average") or "")
+                    meta["studio"] = ((d.get("network") or d.get("webChannel") or {}).get("name")) or ""
+                    meta["genres"] = d.get("genres") or []
+            else:
+                r = await client.get("https://itunes.apple.com/search", params={"term": f"{item.title} {item.year or ''}".strip(), "media": "movie", "limit": 3})
+                if r.status_code == 200:
+                    for res in r.json().get("results", []):
+                        if item.title.lower() in (res.get("trackName") or "").lower():
+                            meta["summary"] = res.get("longDescription") or res.get("shortDescription") or ""
+                            if res.get("trackTimeMillis"):
+                                meta["runtime_min"] = max(1, round(int(res["trackTimeMillis"]) / 60000))
+                            if res.get("releaseDate"):
+                                meta["release_date"] = res["releaseDate"][:10]
+                            meta["content_rating"] = res.get("contentAdvisoryRating") or ""
+                            meta["genres"] = [res.get("primaryGenreName")] if res.get("primaryGenreName") else []
+                            break
+    except Exception:
+        pass
+    return meta
+
+
+def move_media_folder(item: MediaItem, new_parent_dir: str, transfer_files: bool, db: Session) -> dict:
+    """Moves a show or movie folder to a new root directory and optionally auto-transfers all existing files."""
+    cfg = get_settings(db)
+    parent = Path(new_parent_dir.strip())
+    if not str(parent) or str(parent) == ".":
+        raise ValueError("Destination folder path is required.")
+
+    fmt_key = f"{item.media_type}_folder_format"
+    template = cfg.get(fmt_key, "{Title} ({Year})")
+    folder_name = template.replace("{Title}", item.title).replace("{Year}", str(item.year or "")).replace("()", "").strip()
+    clean_name = re.sub(r'[\\/*?:"<>|]', "", folder_name)
+    new_target = parent / clean_name
+
+    def _resolve_existing_path(raw_p: str) -> Path | None:
+        if not raw_p:
+            return None
+        norm = raw_p.replace(chr(92), "/")
+        direct = Path(norm)
+        if direct.exists():
+            return direct
+        # Translate Windows drive letter (e.g. D:/Plex/Movies/... -> /mnt/plex_d/Plex/Movies/...)
+        m_drv = re.match(r"^([a-zA-Z]):/(.*)$", norm)
+        if m_drv:
+            drv = m_drv.group(1).lower()
+            rest = m_drv.group(2)
+            for base in [f"/mnt/plex_{drv}", f"/mnt/{drv}"]:
+                cand = Path(base) / rest
+                if cand.exists():
+                    return cand
+        return direct
+
+    old_path = _resolve_existing_path(item.file_path)
+    moved_files = 0
+
+    if transfer_files and old_path and old_path.exists():
+        if old_path.resolve() == new_target.resolve():
+            return {"ok": True, "new_path": str(new_target), "moved_files": 0, "note": "Already at destination"}
+        new_target.mkdir(parents=True, exist_ok=True)
+        if old_path.is_file():
+            dst_file = new_target / old_path.name
+            shutil.move(str(old_path), str(dst_file))
+            moved_files = 1
+        elif old_path.is_dir():
+            for root, _, files in os.walk(old_path):
+                rel_dir = Path(root).relative_to(old_path)
+                dest_dir = new_target / rel_dir
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                for f in files:
+                    src_f = Path(root) / f
+                    dst_f = dest_dir / f
+                    if not dst_f.exists():
+                        shutil.move(str(src_f), str(dst_f))
+                        moved_files += 1
+            # Clean up empty leftover source directories
+            for root, dirs, files in os.walk(old_path, topdown=False):
+                try:
+                    if not os.listdir(root):
+                        os.rmdir(root)
+                except OSError:
+                    pass
+    else:
+        new_target.mkdir(parents=True, exist_ok=True)
+
+    # Update MediaItem and any EpisodeItem paths in SQLite
+    old_prefix = str(old_path) if old_path else ""
+    item.file_path = str(new_target)
+    if transfer_files and moved_files > 0:
+        item.status = "available"
+
+    episodes = db.query(EpisodeItem).filter_by(media_item_id=item.id).all()
+    for ep in episodes:
+        if ep.file_path and old_prefix and ep.file_path.startswith(old_prefix):
+            rel_ep = ep.file_path[len(old_prefix):].lstrip("/\\")
+            ep.file_path = str(new_target / rel_ep)
+
+    db.commit()
+    return {"ok": True, "new_path": str(new_target), "moved_files": moved_files}
