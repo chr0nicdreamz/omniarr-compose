@@ -15,24 +15,44 @@ QBIT_CATEGORY = os.getenv("QBIT_CATEGORY", "omniarr")
 PLEX_URL = os.getenv("PLEX_URL", "http://plex:32400")
 PLEX_TOKEN = os.getenv("PLEX_TOKEN", "")
 
-# Remote Path Mapping (Translate qBittorrent's reported path -> OmniArr's local mount)
-QBIT_REMOTE_PATH = os.getenv("QBIT_REMOTE_PATH", "/downloads")
-QBIT_LOCAL_MOUNT = os.getenv("QBIT_LOCAL_MOUNT", "/mnt/qbit_downloads")
+# Remote Path Mapping (Matches any Windows drive/UNC path containing plex_e/NAS/Downloads)
+QBIT_REMOTE_PATH = os.getenv("QBIT_REMOTE_PATH", "plex_e/NAS/Downloads")
+QBIT_LOCAL_MOUNT = os.getenv("QBIT_LOCAL_MOUNT", "/mnt/plex_e/NAS/Downloads")
 
-# Configure all your bound Plex media folders across drives
+# Your bound Plex media folders across all drives (excluding plex_e download drive)
 MEDIA_ROOTS = {
     "movie": [
-        Path("/mnt/drive1/Movies"),
-        Path("/mnt/drive2/Movies"),
-        Path("/mnt/drive3/Movies"),
+        Path("/mnt/plex_g/Movies"),
+        Path("/mnt/plex_h/Movies"),
+        Path("/mnt/plex_i/Movies"),
+        Path("/mnt/plex_j/Movies"),
+        Path("/mnt/plex_l/Movies"),
+        Path("/mnt/plex_m/Movies"),
+        Path("/mnt/plex_n/Movies"),
+        Path("/mnt/plex_o/Movies"),
+        Path("/mnt/plex_p/Moviez"),
+        Path("/mnt/plex_q/Movies"),
+        Path("/mnt/plex_r/Movies"),
     ],
     "tv": [
-        Path("/mnt/drive1/TV Shows"),
-        Path("/mnt/drive2/TV Shows"),
-        Path("/mnt/drive3/TV Shows"),
+        Path("/mnt/plex_g/Tv Shows"),
+        Path("/mnt/plex_h/TV"),
+        Path("/mnt/plex_i/TV Shows"),
+        Path("/mnt/plex_j/TV"),
+        Path("/mnt/plex_l/TV"),
+        Path("/mnt/plex_m/TV Shows"),
+        Path("/mnt/plex_n/TV"),
+        Path("/mnt/plex_o/TV"),
+        Path("/mnt/plex_p/TV"),
+        Path("/mnt/plex_q/TV"),
+        Path("/mnt/plex_r/TV"),
     ],
     "music": [
-        Path("/mnt/drive1/Music"),
+        Path("/mnt/plex_i/Music"),
+        Path("/mnt/plex_m/Music"),
+        Path("/mnt/plex_o/Music"),
+        Path("/mnt/plex_p/Music"),
+        Path("/mnt/plex_r/Music"),
     ],
 }
 
@@ -44,16 +64,20 @@ QUALITY_KEYWORDS = {
     "any": [""]
 }
 
+
 def translate_qbit_path(remote_path: str) -> Path:
-    """Translates qBittorrent's remote path to OmniArr's local SMB/NFS mount."""
+    """Translates qBittorrent's Windows/UNC path to OmniArr's local /mnt/plex_e mount."""
     normalized = remote_path.replace("\\", "/")
-    if QBIT_REMOTE_PATH and normalized.startswith(QBIT_REMOTE_PATH):
-        relative = normalized[len(QBIT_REMOTE_PATH):].lstrip("/")
+    marker = QBIT_REMOTE_PATH.strip("/")
+    if marker and marker.lower() in normalized.lower():
+        idx = normalized.lower().index(marker.lower()) + len(marker)
+        relative = normalized[idx:].lstrip("/")
         return Path(QBIT_LOCAL_MOUNT) / relative
     return Path(normalized)
 
+
 def get_best_dest_dir(media_type: str) -> Path:
-    """Selects the Plex drive folder with the most free space."""
+    """Selects the existing Plex drive folder with the most free disk space."""
     candidates = [p for p in MEDIA_ROOTS.get(media_type, []) if p.exists()]
     if not candidates:
         fallback = MEDIA_ROOTS[media_type][0]
@@ -61,7 +85,9 @@ def get_best_dest_dir(media_type: str) -> Path:
         return fallback
     return max(candidates, key=lambda p: shutil.disk_usage(p).free)
 
+
 async def search_prowlarr(query: str, media_type: str, quality: str = "1080p"):
+    """Queries Prowlarr's unified search API and filters by quality and seeders."""
     cat_map = {"movie": [2000], "tv": [5000], "music": [3000]}
     params = {"query": query, "type": "search"}
     for c in cat_map.get(media_type, []):
@@ -81,7 +107,9 @@ async def search_prowlarr(query: str, media_type: str, quality: str = "1080p"):
     filtered.sort(key=lambda x: x.get("seeders", 0), reverse=True)
     return filtered
 
+
 async def send_to_qbittorrent(download_url: str, item_id: int) -> str:
+    """Logs into qBittorrent and adds the torrent with a tracking tag."""
     tag = f"omniarr_{item_id}"
     async with httpx.AsyncClient(timeout=15.0) as client:
         await client.post(
@@ -100,13 +128,17 @@ async def send_to_qbittorrent(download_url: str, item_id: int) -> str:
         torrents = resp.json()
         return torrents[0]["hash"] if torrents else ""
 
+
 async def trigger_plex_scan():
+    """Notifies Plex to scan updated library sections."""
     if not PLEX_TOKEN:
         return
     async with httpx.AsyncClient(timeout=10.0) as client:
         await client.get(f"{PLEX_URL}/library/sections/all/refresh", params={"X-Plex-Token": PLEX_TOKEN})
 
+
 def hardlink_or_copy(src: Path, dst: Path):
+    """Creates a hardlink if on the same filesystem, otherwise copies the file."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
         return
@@ -115,7 +147,9 @@ def hardlink_or_copy(src: Path, dst: Path):
     except OSError:
         shutil.copy2(src, dst)
 
+
 async def check_downloads_and_import(db: Session):
+    """Background worker: checks qBittorrent for completed grabs and imports them."""
     downloading = db.query(MediaItem).filter(MediaItem.status == "downloading").all()
     if not downloading:
         return
