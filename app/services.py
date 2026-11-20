@@ -234,7 +234,7 @@ async def sync_posters_from_plex(db: Session) -> int:
     updated = 0
     headers = {"Accept": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
             sec_resp = await client.get(f"{plex_url}/library/sections", params={"X-Plex-Token": token}, headers=headers)
             sec_resp.raise_for_status()
             sections = sec_resp.json().get("MediaContainer", {}).get("Directory", [])

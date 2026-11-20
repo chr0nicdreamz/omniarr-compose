@@ -2,7 +2,7 @@ import os
 import json
 import httpx
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, Request, Form, HTTPException, Header, UploadFile, File
+from fastapi import FastAPI, Depends, Request, Form, HTTPException, Header, UploadFile, File, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -115,13 +115,20 @@ def delete_media(item_id: int, db: Session = Depends(get_db)):
         db.commit()
     return RedirectResponse(url="/", status_code=303)
 
+async def _bg_sync_posters():
+    db = SessionLocal()
+    try:
+        await sync_posters_from_plex(db)
+    finally:
+        db.close()
+
 @app.post("/import-backup")
-async def import_backup(backup_file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def import_backup(background_tasks: BackgroundTasks, backup_file: UploadFile = File(...), db: Session = Depends(get_db)):
     if not backup_file.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="Please upload a valid .zip backup file.")
     content = await backup_file.read()
     result = parse_and_import_backup(content, db)
-    await sync_posters_from_plex(db)
+    background_tasks.add_task(_bg_sync_posters)
     summary_txt = (
         f"Imported {result['app']}: {result['imported_media']} titles, "
         f"{result['imported_episodes']} grabbed episodes, "
