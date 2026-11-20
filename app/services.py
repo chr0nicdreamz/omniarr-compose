@@ -4,22 +4,8 @@ import httpx
 import re
 from pathlib import Path
 from sqlalchemy.orm import Session
-from .models import MediaItem
+from .models import MediaItem, AppSetting, IndexerConfig
 
-PROWLARR_URL = os.getenv("PROWLARR_URL", "http://prowlarr:9696")
-PROWLARR_API_KEY = os.getenv("PROWLARR_API_KEY", "")
-QBIT_URL = os.getenv("QBIT_URL", "http://qbittorrent:8080")
-QBIT_USER = os.getenv("QBIT_USER", "admin")
-QBIT_PASS = os.getenv("QBIT_PASS", "adminadmin")
-QBIT_CATEGORY = os.getenv("QBIT_CATEGORY", "omniarr")
-PLEX_URL = os.getenv("PLEX_URL", "http://plex:32400")
-PLEX_TOKEN = os.getenv("PLEX_TOKEN", "")
-
-# Remote Path Mapping (Matches any Windows drive/UNC path containing plex_e/NAS/Downloads)
-QBIT_REMOTE_PATH = os.getenv("QBIT_REMOTE_PATH", "plex_e/NAS/Downloads")
-QBIT_LOCAL_MOUNT = os.getenv("QBIT_LOCAL_MOUNT", "/mnt/plex_e/NAS/Downloads")
-
-# Your bound Plex media folders across all drives (excluding plex_e download drive)
 MEDIA_ROOTS = {
     "movie": [
         Path("/mnt/plex_g/Movies"),
@@ -56,135 +42,246 @@ MEDIA_ROOTS = {
     ],
 }
 
+DEFAULT_SETTINGS = {
+    # General & Connect
+    "omniarr_api_key": os.getenv("OMNIARR_API_KEY", "876fcca01ac7bf5b7edf1ca5c56003d4"),
+    "prowlarr_url": os.getenv("PROWLARR_URL", "http://192.168.11.193:9696"),
+    "prowlarr_api_key": os.getenv("PROWLARR_API_KEY", ""),
+    "plex_url": os.getenv("PLEX_URL", "http://192.168.11.115:32400"),
+    "plex_token": os.getenv("PLEX_TOKEN", ""),
+    "plex_notify_grab": "false",
+    "plex_notify_import": "true",
+    # Download Client
+    "qbit_url": os.getenv("QBIT_URL", "http://192.168.11.166:6996"),
+    "qbit_user": os.getenv("QBIT_USER", "hydr0"),
+    "qbit_pass": os.getenv("QBIT_PASS", ""),
+    "qbit_category": os.getenv("QBIT_CATEGORY", "omniarr"),
+    "qbit_remote_path": os.getenv("QBIT_REMOTE_PATH", "plex_e/NAS/Downloads"),
+    "qbit_local_mount": os.getenv("QBIT_LOCAL_MOUNT", "/mnt/plex_e/NAS/Downloads"),
+    # Media Management
+    "import_mode": "hardlink",  # hardlink, copy, move
+    "remove_completed_download": "false",
+    "min_free_space_gb": "20",
+    "movie_folder_format": "{Title} ({Year})",
+    "tv_folder_format": "{Title} ({Year})",
+    "music_folder_format": "{Title}",
+    # Profiles & Custom Formats
+    "default_movie_quality": "1080p",
+    "default_tv_quality": "1080p",
+    "default_music_quality": "lossless",
+    "min_seeders": "3",
+    "max_size_gb": "40",
+    "preferred_keywords": "REMUX, WEB-DL, BluRay, 10bit, Atmos, FLAC",
+    "blocked_keywords": "CAM, HDCAM, TS, TELESYNC, TC, SCREENER, R5",
+    "rss_sync_minutes": "2",
+}
+
 QUALITY_KEYWORDS = {
     "2160p": ["2160p", "4k", "uhd"],
     "1080p": ["1080p"],
     "720p": ["720p"],
     "lossless": ["flac", "alac", "24bit"],
-    "any": [""]
+    "any": [""],
 }
 
+def get_settings(db: Session) -> dict:
+    cfg = DEFAULT_SETTINGS.copy()
+    for row in db.query(AppSetting).all():
+        if row.value is not None and row.value != "":
+            cfg[row.key] = row.value
+        elif row.key in ("plex_notify_grab", "plex_notify_import", "remove_completed_download", "blocked_keywords", "preferred_keywords"):
+            cfg[row.key] = row.value
+    return cfg
 
-def translate_qbit_path(remote_path: str) -> Path:
-    """Translates qBittorrent's Windows/UNC path to OmniArr's local /mnt/plex_e mount."""
+def save_settings(db: Session, updates: dict):
+    for k, v in updates.items():
+        if k not in DEFAULT_SETTINGS:
+            continue
+        row = db.query(AppSetting).filter_by(key=k).first()
+        if row:
+            row.value = str(v)
+        else:
+            db.add(AppSetting(key=k, value=str(v)))
+    db.commit()
+
+def get_drive_stats() -> list:
+    seen = set()
+    drives = []
+    for roots in MEDIA_ROOTS.values():
+        for p in roots:
+            mount = p.parent
+            if str(mount) in seen:
+                continue
+            seen.add(str(mount))
+            if mount.exists():
+                usage = shutil.disk_usage(mount)
+                total_gb = round(usage.total / (1024**3), 1)
+                free_gb = round(usage.free / (1024**3), 1)
+                used_pct = round(((usage.total - usage.free) / usage.total) * 100, 1) if usage.total else 0
+                drives.append({"mount": str(mount), "free_gb": free_gb, "total_gb": total_gb, "used_pct": used_pct})
+    return sorted(drives, key=lambda d: d["mount"])
+
+def translate_qbit_path(remote_path: str, cfg: dict) -> Path:
     normalized = remote_path.replace("\\", "/")
-    marker = QBIT_REMOTE_PATH.strip("/")
+    marker = cfg["qbit_remote_path"].strip("/")
     if marker and marker.lower() in normalized.lower():
         idx = normalized.lower().index(marker.lower()) + len(marker)
         relative = normalized[idx:].lstrip("/")
-        return Path(QBIT_LOCAL_MOUNT) / relative
+        return Path(cfg["qbit_local_mount"]) / relative
     return Path(normalized)
 
-
-def get_best_dest_dir(media_type: str) -> Path:
-    """Selects the existing Plex drive folder with the most free disk space."""
+def get_best_dest_dir(media_type: str, cfg: dict) -> Path:
+    min_free_bytes = float(cfg.get("min_free_space_gb", 20)) * (1024**3)
     candidates = [p for p in MEDIA_ROOTS.get(media_type, []) if p.exists()]
     if not candidates:
         fallback = MEDIA_ROOTS[media_type][0]
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback
-    return max(candidates, key=lambda p: shutil.disk_usage(p).free)
+    eligible = [p for p in candidates if shutil.disk_usage(p).free >= min_free_bytes]
+    pool = eligible if eligible else candidates
+    return max(pool, key=lambda p: shutil.disk_usage(p).free)
 
+def score_release(release: dict, cfg: dict) -> int:
+    title = release.get("title", "").lower()
+    score = release.get("seeders", 0)
+    preferred = [k.strip().lower() for k in cfg.get("preferred_keywords", "").split(",") if k.strip()]
+    for kw in preferred:
+        if kw in title:
+            score += 50
+    return score
 
-async def search_prowlarr(query: str, media_type: str, quality: str = "1080p"):
-    """Queries Prowlarr's unified search API and filters by quality and seeders."""
+async def search_prowlarr(query: str, media_type: str, quality: str, db: Session):
+    cfg = get_settings(db)
     cat_map = {"movie": [2000], "tv": [5000], "music": [3000]}
     params = {"query": query, "type": "search"}
     for c in cat_map.get(media_type, []):
         params.setdefault("categories", []).append(c)
 
-    headers = {"X-Api-Key": PROWLARR_API_KEY}
+    headers = {"X-Api-Key": cfg["prowlarr_api_key"]}
     async with httpx.AsyncClient(timeout=20.0) as client:
-        resp = await client.get(f"{PROWLARR_URL}/api/v1/search", params=params, headers=headers)
+        resp = await client.get(f"{cfg['prowlarr_url'].rstrip('/')}/api/v1/search", params=params, headers=headers)
         resp.raise_for_status()
         results = resp.json()
 
+    disabled_indexers = {
+        idx.name.lower() for idx in db.query(IndexerConfig).filter_by(enabled=False).all()
+    }
+    min_seeders = int(cfg.get("min_seeders", 1))
+    max_size_bytes = float(cfg.get("max_size_gb", 100)) * (1024**3)
+    blocked = [k.strip().lower() for k in cfg.get("blocked_keywords", "").split(",") if k.strip()]
     keywords = QUALITY_KEYWORDS.get(quality.lower(), [""])
-    filtered = [
-        r for r in results
-        if any(k in r.get("title", "").lower() for k in keywords) and r.get("seeders", 0) > 0
-    ]
-    filtered.sort(key=lambda x: x.get("seeders", 0), reverse=True)
+
+    filtered = []
+    for r in results:
+        title_l = r.get("title", "").lower()
+        indexer_l = r.get("indexer", "").lower()
+        if indexer_l in disabled_indexers:
+            continue
+        if r.get("seeders", 0) < min_seeders:
+            continue
+        if max_size_bytes > 0 and r.get("size", 0) > max_size_bytes:
+            continue
+        if any(b in title_l for b in blocked):
+            continue
+        if not any(k in title_l for k in keywords):
+            continue
+        filtered.append(r)
+
+    filtered.sort(key=lambda x: score_release(x, cfg), reverse=True)
     return filtered
 
-
-async def send_to_qbittorrent(download_url: str, item_id: int) -> str:
-    """Logs into qBittorrent and adds the torrent with a tracking tag."""
+async def send_to_qbittorrent(download_url: str, item_id: int, db: Session) -> str:
+    cfg = get_settings(db)
+    qbit_url = cfg["qbit_url"].rstrip("/")
     tag = f"omniarr_{item_id}"
     async with httpx.AsyncClient(timeout=15.0) as client:
         await client.post(
-            f"{QBIT_URL}/api/v2/auth/login",
-            data={"username": QBIT_USER, "password": QBIT_PASS}
+            f"{qbit_url}/api/v2/auth/login",
+            data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]}
         )
         await client.post(
-            f"{QBIT_URL}/api/v2/torrents/add",
+            f"{qbit_url}/api/v2/torrents/add",
             data={
                 "urls": download_url,
-                "category": QBIT_CATEGORY,
+                "category": cfg["qbit_category"],
                 "tags": tag
             }
         )
-        resp = await client.get(f"{QBIT_URL}/api/v2/torrents/info", params={"tag": tag})
+        resp = await client.get(f"{qbit_url}/api/v2/torrents/info", params={"tag": tag})
         torrents = resp.json()
+        if torrents and cfg.get("plex_notify_grab") == "true":
+            await trigger_plex_scan(cfg)
         return torrents[0]["hash"] if torrents else ""
 
-
-async def trigger_plex_scan():
-    """Notifies Plex to scan updated library sections."""
-    if not PLEX_TOKEN:
+async def trigger_plex_scan(cfg: dict):
+    token = cfg.get("plex_token", "")
+    if not token:
         return
     async with httpx.AsyncClient(timeout=10.0) as client:
-        await client.get(f"{PLEX_URL}/library/sections/all/refresh", params={"X-Plex-Token": PLEX_TOKEN})
+        await client.get(f"{cfg['plex_url'].rstrip('/')}/library/sections/all/refresh", params={"X-Plex-Token": token})
 
-
-def hardlink_or_copy(src: Path, dst: Path):
-    """Creates a hardlink if on the same filesystem, otherwise copies the file."""
+def transfer_file(src: Path, dst: Path, mode: str):
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
         return
-    try:
-        os.link(src, dst)
-    except OSError:
+    if mode == "move":
+        shutil.move(str(src), str(dst))
+    elif mode == "copy":
         shutil.copy2(src, dst)
-
+    else:
+        try:
+            os.link(src, dst)
+        except OSError:
+            shutil.copy2(src, dst)
 
 async def check_downloads_and_import(db: Session):
-    """Background worker: checks qBittorrent for completed grabs and imports them."""
     downloading = db.query(MediaItem).filter(MediaItem.status == "downloading").all()
     if not downloading:
         return
 
+    cfg = get_settings(db)
+    qbit_url = cfg["qbit_url"].rstrip("/")
     async with httpx.AsyncClient(timeout=15.0) as client:
         await client.post(
-            f"{QBIT_URL}/api/v2/auth/login",
-            data={"username": QBIT_USER, "password": QBIT_PASS}
+            f"{qbit_url}/api/v2/auth/login",
+            data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]}
         )
-        resp = await client.get(f"{QBIT_URL}/api/v2/torrents/info", params={"category": QBIT_CATEGORY})
+        resp = await client.get(f"{qbit_url}/api/v2/torrents/info", params={"category": cfg["qbit_category"]})
         torrents = {t["hash"]: t for t in resp.json()}
 
     imported_any = False
+    mode = cfg.get("import_mode", "hardlink")
+
     for item in downloading:
         t = torrents.get(item.torrent_hash)
         if not t:
             continue
         if t.get("progress", 0) >= 1.0:
-            content_path = translate_qbit_path(t["content_path"])
-            clean_name = re.sub(r'[\\/*?:"<>|]', "", f"{item.title} ({item.year})" if item.year else item.title)
-            target_base = get_best_dest_dir(item.media_type) / clean_name
+            content_path = translate_qbit_path(t["content_path"], cfg)
+            fmt_key = f"{item.media_type}_folder_format"
+            template = cfg.get(fmt_key, "{Title} ({Year})")
+            folder_name = template.replace("{Title}", item.title).replace("{Year}", str(item.year or "")).replace("()", "").strip()
+            clean_name = re.sub(r'[\\/*?:"<>|]', "", folder_name)
+            target_base = get_best_dest_dir(item.media_type, cfg) / clean_name
 
             if content_path.is_file():
-                hardlink_or_copy(content_path, target_base / content_path.name)
+                transfer_file(content_path, target_base / content_path.name, mode)
             elif content_path.is_dir():
                 for root, _, files in os.walk(content_path):
                     for f in files:
                         if f.lower().endswith((".mkv", ".mp4", ".avi", ".flac", ".mp3", ".m4a")):
                             src_file = Path(root) / f
-                            hardlink_or_copy(src_file, target_base / f)
+                            transfer_file(src_file, target_base / f, mode)
+
+            if cfg.get("remove_completed_download") == "true":
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(f"{qbit_url}/api/v2/auth/login", data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]})
+                    await client.post(f"{qbit_url}/api/v2/torrents/delete", data={"hashes": item.torrent_hash, "deleteFiles": "true"})
 
             item.status = "available"
             item.file_path = str(target_base)
             db.commit()
             imported_any = True
 
-    if imported_any:
-        await trigger_plex_scan()
+    if imported_any and cfg.get("plex_notify_import", "true") == "true":
+        await trigger_plex_scan(cfg)
