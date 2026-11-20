@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Request, Form, HTTPException, Header, UploadFile, File, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -43,7 +44,13 @@ async def scheduled_tasks():
 async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler()
     scheduler.add_job(scheduled_tasks, "interval", minutes=2)
-    scheduler.start()
+    import fcntl as _fcntl
+    _sched_lock = open("/tmp/omniarr_scheduler.lock", "w")
+    try:
+        _fcntl.flock(_sched_lock, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+        scheduler.start()
+    except BlockingIOError:
+        pass
     yield
     scheduler.shutdown()
 
@@ -69,27 +76,33 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
     else:
         q = q.order_by(MediaItem.added_at.desc())
     items = q.all()
-    episodes_by_media = {}
-    for ep in db.query(EpisodeItem).order_by(EpisodeItem.season_number.asc(), EpisodeItem.episode_number.asc()).all():
-        episodes_by_media.setdefault(ep.media_item_id, []).append(ep)
+    episode_counts = dict(
+        db.query(EpisodeItem.media_item_id, func.count(EpisodeItem.id))
+        .group_by(EpisodeItem.media_item_id)
+        .all()
+    )
 
     cfg = get_settings(db)
     indexers = db.query(IndexerConfig).order_by(IndexerConfig.priority.asc(), IndexerConfig.name.asc()).all()
     profiles = db.query(QualityProfile).order_by(QualityProfile.name.asc()).all()
     custom_formats = db.query(CustomFormat).order_by(CustomFormat.name.asc()).all()
     drives = get_drive_stats(db)
+    drive_free_map = {d["mount"]: d["free_gb"] for d in drives}
     roots_map = get_media_roots(db)
     root_folders = []
     for m_type, paths in roots_map.items():
         for p in paths:
-            exists = p.exists()
-            free_gb = round(shutil.disk_usage(p).free / (1024**3), 1) if exists else None
-            root_folders.append({"media_type": m_type, "path": str(p), "exists": exists, "free_gb": free_gb})
+            p_str = str(p)
+            free_gb = drive_free_map.get(p_str)
+            exists = free_gb is not None or p.exists()
+            if exists and free_gb is None:
+                free_gb = round(shutil.disk_usage(p).free / (1024**3), 1)
+            root_folders.append({"media_type": m_type, "path": p_str, "exists": exists, "free_gb": free_gb})
 
     return templates.TemplateResponse("index.html", {
         "request": request,
         "items": items,
-        "episodes_by_media": episodes_by_media,
+        "episode_counts": episode_counts,
         "cfg": cfg,
         "indexers": indexers,
         "profiles": profiles,
@@ -100,6 +113,24 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
         "sort": sort,
         "msg": msg,
     })
+
+@app.get("/api/media/{media_id}/episodes")
+def get_media_episodes(media_id: int, db: Session = Depends(get_db)):
+    eps = (
+        db.query(EpisodeItem)
+        .filter(EpisodeItem.media_item_id == media_id)
+        .order_by(EpisodeItem.season_number.asc(), EpisodeItem.episode_number.asc())
+        .all()
+    )
+    return [
+        {
+            "season": ep.season_number,
+            "episode": ep.episode_number,
+            "title": ep.title or "",
+            "release": ep.quality or ep.file_path or "",
+        }
+        for ep in eps
+    ]
 
 @app.post("/add")
 async def add_media(

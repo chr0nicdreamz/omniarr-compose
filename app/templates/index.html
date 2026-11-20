@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OmniArr — Unified Media Manager</title>
     <script src="https://cdn.tailwindcss.com"></script>
+<style>
+    .media-card-row { content-visibility: auto; contain-intrinsic-size: 72px; }
+</style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
     <div class="max-w-7xl mx-auto p-4 md:p-8">
@@ -59,13 +62,13 @@
 
         <!-- MEDIA ITEM MACRO (Supports both Tile Grid & List View) -->
         {% macro render_card(item) %}
-        {% set eps = episodes_by_media.get(item.id, []) %}
+        {% set ep_count = episode_counts.get(item.id, 0) %}
         <div class="media-card bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-slate-700 transition flex flex-col">
             <div class="card-inner flex flex-col h-full">
                 <!-- Poster Container (Large 2:3 in Grid, 24x36 in List) -->
                 <div class="poster-box relative w-full aspect-[2/3] bg-slate-800 overflow-hidden flex-shrink-0">
                     {% if item.poster_url %}
-                    <img src="{{ item.poster_url }}" alt="{{ item.title }}" class="w-full h-full object-cover" loading="lazy">
+                    <img loading="lazy" decoding="async" src="{{ item.poster_url }}" alt="{{ item.title }}" class="w-full h-full object-cover" loading="lazy">
                     {% else %}
                     <div class="w-full h-full flex flex-col items-center justify-center p-3 text-center bg-gradient-to-br from-slate-800 to-slate-900">
                         <span class="text-xs uppercase tracking-wider text-slate-500 font-bold">{{ item.media_type }}</span>
@@ -119,10 +122,10 @@
                         <p class="list-path hidden text-xs text-slate-500 truncate mt-1.5 font-mono">{{ item.file_path }}</p>
                         {% endif %}
 
-                        {% if eps %}
-                        <button type="button" onclick="toggleEpisodes('eps-{{ item.id }}')"
+                        {% if ep_count %}
+                        <button type="button" onclick="toggleEpisodes({{ item.id }})"
                                 class="mt-2 inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 font-medium">
-                            <span>▾ {{ eps|length }} Grabbed Ep{{ 's' if eps|length != 1 }}</span>
+                            <span>▾ {{ ep_count }} Grabbed Ep{{ 's' if ep_count != 1 }}</span>
                         </button>
                         {% endif %}
                     </div>
@@ -144,30 +147,9 @@
                 </div>
             </div>
 
-            <!-- Expandable Grabbed Episodes Drawer -->
-            {% if eps %}
-            <div id="eps-{{ item.id }}" class="hidden px-3.5 pb-3.5 pt-2 border-t border-slate-800 bg-slate-950/60 max-h-56 overflow-y-auto">
-                <table class="w-full text-left text-xs">
-                    <thead class="text-slate-400 uppercase bg-slate-800/50">
-                        <tr>
-                            <th class="px-2 py-1">Ep</th>
-                            <th class="px-2 py-1">Title</th>
-                            <th class="px-2 py-1">Release</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-800/70">
-                        {% for ep in eps %}
-                        <tr>
-                            <td class="px-2 py-1 font-mono text-indigo-300 whitespace-nowrap">
-                                S{{ "%02d"|format(ep.season_number) }}E{{ "%02d"|format(ep.episode_number) }}
-                            </td>
-                            <td class="px-2 py-1 text-slate-200">{{ ep.title }}</td>
-                            <td class="px-2 py-1 text-slate-400 font-mono truncate max-w-[160px]">{{ ep.quality or ep.file_path }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+            <!-- Lazy-Loaded Grabbed Episodes Drawer -->
+            {% if ep_count %}
+            <div id="eps-{{ item.id }}" data-loaded="false" class="hidden px-3.5 pb-3.5 pt-2 border-t border-slate-800 bg-slate-950/60 max-h-56 overflow-y-auto"></div>
             {% endif %}
         </div>
         {% endmacro %}
@@ -727,9 +709,30 @@
 
     <script>
         function toggleSecret(id) { const el = document.getElementById(id); if (el) el.type = (el.type === 'password') ? 'text' : 'password'; }
-        function toggleEpisodes(id) {
-            const el = document.getElementById(id);
-            if (el) el.classList.toggle('hidden');
+        async function toggleEpisodes(mediaId) {
+            const box = document.getElementById(`eps-${mediaId}`);
+            if (!box) return;
+            box.classList.toggle('hidden');
+            if (box.classList.contains('hidden') || box.dataset.loaded === 'true') return;
+            box.innerHTML = '<p class="text-xs text-slate-400 py-2">Loading episodes...</p>';
+            const res = await fetch(`/api/media/${mediaId}/episodes`);
+            const eps = await res.json();
+            let rows = eps.map(ep => {
+                const s = String(ep.season).padStart(2, '0');
+                const e = String(ep.episode).padStart(2, '0');
+                return `<tr>
+                    <td class="px-2 py-1 font-mono text-indigo-300 whitespace-nowrap">S${s}E${e}</td>
+                    <td class="px-2 py-1 text-slate-200">${ep.title}</td>
+                    <td class="px-2 py-1 text-slate-400 font-mono truncate max-w-[160px]">${ep.release}</td>
+                </tr>`;
+            }).join('');
+            box.innerHTML = `<table class="w-full text-left text-xs">
+                <thead class="text-slate-400 uppercase bg-slate-800/50">
+                    <tr><th class="px-2 py-1">Ep</th><th class="px-2 py-1">Title</th><th class="px-2 py-1">Release</th></tr>
+                </thead>
+                <tbody class="divide-y divide-slate-800/70">${rows}</tbody>
+            </table>`;
+            box.dataset.loaded = 'true';
         }
         function filterLibrary(type) {
             const m = document.getElementById('section-movies');

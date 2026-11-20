@@ -100,7 +100,13 @@ def save_settings(db: Session, updates: dict):
             db.add(AppSetting(key=k, value=str(v)))
     db.commit()
 
-def get_drive_stats(db: Session = None) -> list:
+import time as _time
+_DRIVE_CACHE = {"ts": 0.0, "data": []}
+
+def get_drive_stats(db: Session = None, force: bool = False) -> list:
+    now = _time.time()
+    if not force and _DRIVE_CACHE["data"] and (now - _DRIVE_CACHE["ts"]) < 60:
+        return _DRIVE_CACHE["data"]
     seen = set()
     drives = []
     for roots in get_media_roots(db).values():
