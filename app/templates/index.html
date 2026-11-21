@@ -573,9 +573,12 @@
                 <!-- Legend & Quick Filter -->
                 <div class="flex flex-wrap items-center gap-2 text-[11px]">
                     <button type="button" onclick="filterCalPills('all', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-indigo-600 text-white font-semibold">All</button>
+                    <button type="button" onclick="filterCalPills('movie', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-purple-950/80 border border-purple-500/50 text-purple-200 hover:bg-purple-900/80">🎬 Movies</button>
+                    <button type="button" onclick="filterCalPills('tv', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-sky-950/80 border border-sky-500/50 text-sky-200 hover:bg-sky-900/80">📺 TV Shows</button>
+                    <span class="text-slate-700">|</span>
                     <button type="button" onclick="filterCalPills('missing', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-slate-800 text-amber-300 hover:bg-slate-700">⏳ Missing</button>
-                    <button type="button" onclick="filterCalPills('available', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-slate-800 text-emerald-300 hover:bg-slate-700">✓ Available</button>
-                    <button type="button" onclick="filterCalPills('upcoming', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-slate-800 text-sky-300 hover:bg-slate-700">🗓️ Upcoming</button>
+                    <button type="button" onclick="filterCalPills('available', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-slate-800 text-emerald-300 hover:bg-slate-700">✓ Grabbed</button>
+                    <button type="button" onclick="filterCalPills('upcoming', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 hover:bg-slate-700">🗓️ Upcoming</button>
                     <span class="mx-1 text-slate-700">|</span>
                     <button type="button" onclick="syncCalendarNow()"
                             class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white shadow">
@@ -621,35 +624,47 @@
                     {% for week in calendar_weeks %}
                     <div class="grid grid-cols-7 divide-x divide-slate-800">
                         {% for cell in week %}
-                        <div class="min-h-[128px] p-2 flex flex-col gap-1.5 {{ 'bg-indigo-950/20 ring-1 ring-inset ring-indigo-500/40' if cell.is_today else ('bg-slate-900/60' if cell.in_month else 'bg-slate-950/50 opacity-60') }}">
+                        <div class="min-h-[180px] p-2.5 flex flex-col gap-2 {{ 'bg-indigo-950/20 ring-1 ring-inset ring-indigo-500/40' if cell.is_today else ('bg-slate-900/60' if cell.in_month else 'bg-slate-950/50 opacity-60') }}">
                             <div class="flex items-center justify-between">
                                 <span class="text-xs font-bold {{ 'bg-indigo-600 text-white px-2 py-0.5 rounded-full' if cell.is_today else ('text-slate-200' if cell.in_month else 'text-slate-500') }}">
                                     {{ cell.day }}
                                 </span>
                                 {% if cell.entries|length > 0 %}
-                                <span class="text-[10px] text-slate-500 font-mono">{{ cell.entries|length }}</span>
+                                <span class="text-[10px] text-slate-400 font-mono bg-slate-950/80 px-1.5 py-0.5 rounded border border-slate-800">{{ cell.entries|length }}</span>
                                 {% endif %}
                             </div>
 
-                            <div class="space-y-1 overflow-y-auto max-h-[145px] pr-0.5">
+                            <div class="space-y-1.5 overflow-y-auto max-h-[220px] pr-0.5">
                                 {% for entry in cell.entries %}
                                 {% set pill_state = 'available' if entry.has_file else ('missing' if entry.is_past_or_today else 'upcoming') %}
+                                {% set is_movie = (entry.kind == 'movie') %}
                                 <div data-cal-state="{{ pill_state }}"
-                                     class="cal-pill rounded-md px-2 py-1 text-[11px] leading-tight border transition
-                                     {{ 'bg-emerald-950/70 border-emerald-700/50 text-emerald-200' if entry.has_file else ('bg-amber-950/70 border-amber-700/50 text-amber-200' if entry.is_past_or_today else 'bg-sky-950/60 border-sky-800/50 text-sky-200') }}">
-                                    <div class="flex items-center justify-between gap-1">
-                                        <a href="/media/{{ entry.media_id }}" title="{{ entry.title }} — {{ entry.subtitle }}"
-                                           class="font-semibold truncate hover:underline">
-                                            {{ entry.title }}
-                                        </a>
-                                        {% if not entry.has_file and entry.is_past_or_today and entry.kind == 'tv' %}
-                                        <button type="button" onclick="huntCalendarEp({{ entry.id }}, this)" title="Hunt Episode Now"
-                                                class="shrink-0 bg-amber-600 hover:bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.2 rounded">
-                                            Hunt
-                                        </button>
-                                        {% endif %}
+                                     data-cal-kind="{{ entry.kind }}"
+                                     class="cal-pill rounded-lg px-2.5 py-1.5 text-[11px] leading-snug border transition
+                                     {{ 'bg-purple-950/80 border-purple-500/50 text-purple-100' if is_movie else 'bg-sky-950/80 border-sky-500/45 text-sky-100' }}
+                                     {{ 'border-l-4 border-l-emerald-400' if entry.has_file else ('border-l-4 border-l-amber-400' if entry.is_past_or_today else '') }}">
+                                    <div class="flex items-center justify-between gap-1 mb-0.5">
+                                        <span class="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded {{ 'bg-purple-800/70 text-purple-200' if is_movie else 'bg-sky-800/70 text-sky-200' }}">
+                                            {{ '🎬 Movie' if is_movie else '📺 TV' }}
+                                        </span>
+                                        <div class="flex items-center gap-1">
+                                            {% if entry.has_file %}
+                                            <span title="Grabbed / On Disk" class="text-[10px] font-bold text-emerald-300 bg-emerald-950/90 border border-emerald-600/50 px-1.5 rounded">✓</span>
+                                            {% elif entry.is_past_or_today and not is_movie %}
+                                            <button type="button" onclick="huntCalendarEp({{ entry.id }}, this)" title="Hunt Episode Now"
+                                                    class="shrink-0 bg-amber-600 hover:bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.2 rounded">
+                                                Hunt
+                                            </button>
+                                            {% elif entry.is_past_or_today %}
+                                            <span title="Missing" class="text-[10px] font-bold text-amber-300">⏳</span>
+                                            {% endif %}
+                                        </div>
                                     </div>
-                                    <div class="text-[10px] opacity-80 font-mono truncate">
+                                    <a href="/media/{{ entry.media_id }}" title="{{ entry.title }} — {{ entry.subtitle }}"
+                                       class="block font-semibold truncate hover:underline text-white">
+                                        {{ entry.title }}
+                                    </a>
+                                    <div class="text-[10px] opacity-85 font-mono truncate">
                                         {{ entry.subtitle }}
                                     </div>
                                 </div>
@@ -665,14 +680,18 @@
         <script>
         function filterCalPills(state, btn) {
             document.querySelectorAll('.cal-filter-btn').forEach(b => {
-                b.classList.remove('bg-indigo-600', 'text-white');
-                b.classList.add('bg-slate-800');
+                b.classList.remove('ring-2', 'ring-white', 'bg-indigo-600', 'text-white');
             });
-            btn.classList.remove('bg-slate-800');
-            btn.classList.add('bg-indigo-600', 'text-white');
+            btn.classList.add('ring-2', 'ring-white');
             document.querySelectorAll('.cal-pill').forEach(el => {
-                el.style.display = (state === 'all' || el.dataset.calState === state) ? '' : 'none';
-            });
+                if (state === 'all') {
+                    el.style.display = '';
+                } else if (state === 'movie' || state === 'tv') {
+                    el.style.display = (el.dataset.calKind === state) ? '' : 'none';
+                } else {
+                    el.style.display = (el.dataset.calState === state) ? '' : 'none';
+                }
+            }););
         }
         async function syncCalendarNow() {
             try {
