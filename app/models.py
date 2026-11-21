@@ -16,6 +16,7 @@ class MediaItem(Base):
     torrent_hash = Column(String, nullable=True)
     file_path = Column(String, nullable=True)
     poster_url = Column(String, nullable=True)
+    release_date = Column(String, default="")
     added_at = Column(DateTime, default=datetime.utcnow)
 
 class EpisodeItem(Base):
@@ -26,6 +27,7 @@ class EpisodeItem(Base):
     season_number = Column(Integer)
     episode_number = Column(Integer)
     title = Column(String, default="")
+    air_date = Column(String, default="")
     has_file = Column(Boolean, default=False)
     quality = Column(String, default="")
     file_path = Column(String, nullable=True)

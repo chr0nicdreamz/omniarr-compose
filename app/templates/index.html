@@ -8,14 +8,31 @@
 <style>
     .media-card-row { content-visibility: auto; contain-intrinsic-size: 72px; }
 </style>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
     <div class="max-w-7xl mx-auto p-4 md:p-8">
         <!-- Top Header -->
         <header class="flex flex-wrap justify-between items-center gap-4 mb-6 border-b border-slate-800 pb-4">
             <div>
-                <h1 class="text-2xl md:text-3xl font-bold text-indigo-400 tracking-tight">OmniArr</h1>
-                <p class="text-xs text-slate-400">Unified Sonarr • Radarr • Lidarr • Prowlarr Engine</p>
+                <a href="/?tab=library" title="Back to OmniArr Home" class="inline-flex items-center gap-3 group focus:outline-none">
+                <span class="w-10 h-10 rounded-xl bg-slate-900 border border-indigo-500/40 flex items-center justify-center shadow-lg shadow-indigo-950/50 group-hover:border-indigo-400 group-hover:scale-105 transition">
+                    <svg class="w-6 h-6" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <linearGradient id="omniGrad" x1="0" y1="0" x2="1" y2="1">
+                                <stop offset="0%" stop-color="#818cf8"/>
+                                <stop offset="100%" stop-color="#38bdf8"/>
+                            </linearGradient>
+                        </defs>
+                        <circle cx="32" cy="32" r="21" stroke="url(#omniGrad)" stroke-width="5.5"/>
+                        <polygon points="28,22 43,32 28,42" fill="#e0e7ff"/>
+                    </svg>
+                </span>
+                <span>
+                    <span class="block text-2xl font-extrabold tracking-tight text-indigo-400 group-hover:text-indigo-300 transition">OmniArr</span>
+                    <span class="block text-xs text-slate-400">Unified Sonarr • Radarr • Lidarr • Prowlarr Engine</span>
+                </span>
+            </a>
             </div>
             <div id="bg-task-pill" class="hidden items-center gap-2 bg-indigo-950/90 border border-indigo-500/50 text-indigo-200 px-3 py-1 rounded-full text-xs font-medium shadow-lg">
                     <span id="bg-task-dot" class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
@@ -81,6 +98,10 @@
                    class="px-4 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'library' else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
                     🏠 Home
                 </a>
+            <a href="/?tab=calendar"
+               class="px-3.5 py-2 rounded-lg text-xs font-semibold transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'calendar' else 'text-slate-300 hover:bg-slate-800' }}">
+                📅 Calendar
+            </a>
                 <a href="/?tab=activity"
                    class="px-4 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab in ('activity', 'history') else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
                     📥 Activity &amp; Logs
@@ -344,10 +365,44 @@
         {% endif %}
         {% if active_tab == 'activity' %}
         <div class="space-y-6">
-            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
+            <!-- 30-Day Torrent History: Searched, Downloaded & Blacklisted -->
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl shadow-lg">
+                <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4 mb-4">
+                    <div>
+                        <h2 class="text-lg font-bold text-indigo-300">📜 30-Day Torrent Activity History</h2>
+                        <p class="text-xs text-slate-400">Rolling 30-day log of searched torrents, downloaded/imported releases, and blacklisted torrents</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <input id="hist30-search" type="text" oninput="renderHistory30d()" placeholder="Filter title or query..."
+                               class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                        <button type="button" onclick="loadHistory30d()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium">↻ Refresh</button>
+                    </div>
+                </div>
+
+                <!-- Category Filter Pills -->
+                <div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
+                    <button type="button" onclick="setHist30Filter('all', this)" class="h30-pill px-3 py-1.5 rounded-full bg-indigo-600 text-white font-semibold">
+                        All (<span id="h30-cnt-all">0</span>)
+                    </button>
+                    <button type="button" onclick="setHist30Filter('searched', this)" class="h30-pill px-3 py-1.5 rounded-full bg-slate-800 text-sky-300 hover:bg-slate-700 font-medium">
+                        🔎 Searched (<span id="h30-cnt-searched">0</span>)
+                    </button>
+                    <button type="button" onclick="setHist30Filter('downloaded', this)" class="h30-pill px-3 py-1.5 rounded-full bg-slate-800 text-emerald-300 hover:bg-slate-700 font-medium">
+                        ⬇️ Downloaded / Imported (<span id="h30-cnt-downloaded">0</span>)
+                    </button>
+                    <button type="button" onclick="setHist30Filter('blacklisted', this)" class="h30-pill px-3 py-1.5 rounded-full bg-slate-800 text-rose-300 hover:bg-slate-700 font-medium">
+                        🚫 Blacklisted (<span id="h30-cnt-blacklisted">0</span>)
+                    </button>
+                </div>
+
+                <div id="history-30d-box" class="text-xs text-slate-400">Loading 30-day torrent activity...</div>
+            </div>
+
+            <!-- Live qBittorrent Activity Queue -->
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl">
                 <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
                     <div>
-                        <h2 class="text-lg font-semibold text-indigo-300">Live qBittorrent Activity Queue</h2>
+                        <h2 class="text-base font-semibold text-indigo-300">Live qBittorrent Activity Queue</h2>
                         <p class="text-xs text-slate-400">Active &amp; completed torrents in category <span class="font-mono text-slate-300">{{ cfg.qbit_category }}</span></p>
                     </div>
                     <button type="button" onclick="loadActivityTab()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium">↻ Refresh Queue</button>
@@ -355,22 +410,264 @@
                 <div id="activity-queue-box" class="text-xs text-slate-400">Loading qBittorrent queue...</div>
             </div>
 
-            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
+            <!-- Manual Import Scanner -->
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl">
                 <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
                     <div>
-                        <h2 class="text-lg font-semibold text-indigo-300">Manual Import Scanner</h2>
+                        <h2 class="text-base font-semibold text-indigo-300">Manual Import Scanner</h2>
                         <p class="text-xs text-slate-400">Scan <span class="font-mono text-slate-300">{{ cfg.qbit_local_mount }}</span> for video files and map them to any library item</p>
                     </div>
                     <button type="button" onclick="loadManualImportFiles()" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded text-xs font-medium text-white">Scan Download Mount</button>
                 </div>
                 <div id="manual-import-box" class="text-xs text-slate-400">Click <strong>Scan Download Mount</strong> to list files available for manual import.</div>
             </div>
+        </div>
+        <script>
+        let _h30Data = [];
+        let _h30Filter = 'all';
 
-            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
-                <h2 class="text-base font-semibold text-rose-300 border-b border-slate-800 pb-2 mb-3">Recently Blacklisted Releases</h2>
-                <div id="blacklist-box" class="text-xs text-slate-400">Loading blacklist history...</div>
+        function setHist30Filter(cat, btn) {
+            _h30Filter = cat;
+            document.querySelectorAll('.h30-pill').forEach(b => {
+                b.classList.remove('bg-indigo-600', 'text-white');
+                b.classList.add('bg-slate-800');
+            });
+            btn.classList.remove('bg-slate-800');
+            btn.classList.add('bg-indigo-600', 'text-white');
+            renderHistory30d();
+        }
+
+        async function loadHistory30d() {
+            try {
+                const res = await fetch('/api/activity/history-30d');
+                const data = await res.json();
+                _h30Data = data.items || [];
+                const c = data.counts || {};
+                document.getElementById('h30-cnt-all').textContent = c.all || 0;
+                document.getElementById('h30-cnt-searched').textContent = c.searched || 0;
+                document.getElementById('h30-cnt-downloaded').textContent = c.downloaded || 0;
+                document.getElementById('h30-cnt-blacklisted').textContent = c.blacklisted || 0;
+                renderHistory30d();
+            } catch (e) {
+                document.getElementById('history-30d-box').innerHTML = '<p class="text-rose-400">Failed to load 30-day activity history.</p>';
+            }
+        }
+
+        async function unblacklistItem(rawId, btn) {
+            btn.disabled = true;
+            btn.textContent = '...';
+            try {
+                const res = await fetch(`/api/activity/unblacklist/${rawId}`, { method: 'POST' });
+                if (res.ok) await loadHistory30d();
+            } catch (e) {
+                btn.disabled = false;
+                btn.textContent = 'Unblacklist';
+            }
+        }
+
+        function renderHistory30d() {
+            const box = document.getElementById('history-30d-box');
+            if (!box) return;
+            const q = (document.getElementById('hist30-search')?.value || '').trim().toLowerCase();
+            const filtered = _h30Data.filter(item => {
+                if (_h30Filter !== 'all' && item.category !== _h30Filter) return false;
+                if (q && !(item.title.toLowerCase().includes(q) || item.detail.toLowerCase().includes(q))) return false;
+                return true;
+            });
+
+            if (!filtered.length) {
+                box.innerHTML = '<div class="p-6 text-center text-slate-500 border border-slate-800/80 rounded-lg">No torrent activity found in this filter for the last 30 days.</div>';
+                return;
+            }
+
+            const rows = filtered.map(item => {
+                let badge = '';
+                if (item.category === 'searched') {
+                    badge = '<span class="px-2 py-0.5 rounded-full bg-sky-950 text-sky-300 border border-sky-800/60 text-[11px] font-semibold">🔎 SEARCHED</span>';
+                } else if (item.event_type === 'import') {
+                    badge = '<span class="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/60 text-[11px] font-semibold">✅ IMPORTED</span>';
+                } else if (item.category === 'downloaded') {
+                    badge = '<span class="px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800/60 text-[11px] font-semibold">⬇️ GRABBED</span>';
+                } else if (item.category === 'blacklisted') {
+                    badge = '<span class="px-2 py-0.5 rounded-full bg-rose-950 text-rose-300 border border-rose-800/60 text-[11px] font-semibold">🚫 BLACKLISTED</span>';
+                } else {
+                    badge = `<span class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[11px]">${item.event_type.toUpperCase()}</span>`;
+                }
+
+                const titleHtml = item.media_item_id
+                    ? `<a href="/media/${item.media_item_id}" class="font-semibold text-slate-100 hover:text-indigo-300">${item.title}</a>`
+                    : `<span class="font-semibold text-slate-100">${item.title}</span>`;
+
+                const actionHtml = item.category === 'blacklisted'
+                    ? `<button type="button" onclick="unblacklistItem(${item.raw_id}, this)" class="text-rose-300 hover:text-rose-200 bg-rose-950/60 border border-rose-800/60 px-2.5 py-1 rounded text-[11px]">Unblacklist</button>`
+                    : '';
+
+                return `<tr class="hover:bg-slate-800/40 transition">
+                    <td class="px-3 py-2.5 font-mono text-slate-400 whitespace-nowrap">${item.created_at}</td>
+                    <td class="px-3 py-2.5 whitespace-nowrap">${badge}</td>
+                    <td class="px-3 py-2.5">${titleHtml}<div class="text-[11px] text-slate-400 font-mono break-all">${item.detail}</div></td>
+                    <td class="px-3 py-2.5 text-right whitespace-nowrap">${actionHtml}</td>
+                </tr>`;
+            }).join('');
+
+            box.innerHTML = `<div class="overflow-x-auto border border-slate-800 rounded-lg max-h-[520px] overflow-y-auto">
+                <table class="w-full text-left text-xs">
+                    <thead class="bg-slate-950/90 text-slate-400 uppercase text-[11px] border-b border-slate-800 sticky top-0">
+                        <tr>
+                            <th class="px-3 py-2.5">Date / Time</th>
+                            <th class="px-3 py-2.5">Action</th>
+                            <th class="px-3 py-2.5">Torrent / Search Query</th>
+                            <th class="px-3 py-2.5 text-right">Manage</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-800/70">${rows}</tbody>
+                </table>
+            </div>`;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadHistory30d();
+        });
+        </script>
+        {% endif %}
+
+        {% if active_tab == 'calendar' %}
+        <div class="space-y-4">
+            <!-- Header & Month Controls -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                    <h2 class="text-lg font-bold text-indigo-300">📅 {{ cal_month_label }}</h2>
+                    <div class="inline-flex rounded-lg bg-slate-950 border border-slate-800 p-0.5 text-xs">
+                        <a href="/?tab=calendar&cal_month={{ prev_month_str }}" class="px-2.5 py-1 rounded-md text-slate-300 hover:bg-slate-800">◀ Prev</a>
+                        <a href="/?tab=calendar" class="px-2.5 py-1 rounded-md text-indigo-300 hover:bg-slate-800 font-semibold">Today</a>
+                        <a href="/?tab=calendar&cal_month={{ next_month_str }}" class="px-2.5 py-1 rounded-md text-slate-300 hover:bg-slate-800">Next ▶</a>
+                    </div>
+                </div>
+
+                <!-- Legend & Quick Filter -->
+                <div class="flex flex-wrap items-center gap-2 text-[11px]">
+                    <button type="button" onclick="filterCalPills('all', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-indigo-600 text-white font-semibold">All</button>
+                    <button type="button" onclick="filterCalPills('missing', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-slate-800 text-amber-300 hover:bg-slate-700">⏳ Missing</button>
+                    <button type="button" onclick="filterCalPills('available', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-slate-800 text-emerald-300 hover:bg-slate-700">✓ Available</button>
+                    <button type="button" onclick="filterCalPills('upcoming', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-slate-800 text-sky-300 hover:bg-slate-700">🗓️ Upcoming</button>
+                    <span class="mx-1 text-slate-700">|</span>
+                    <button type="button" onclick="syncCalendarNow()"
+                            class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white shadow">
+                        🔄 Sync Air Dates
+                    </button>
+                </div>
+            </div>
+
+            <!-- Compact Aired & Missing Strip -->
+            {% set aired_missing = calendar_entries | selectattr('is_past_or_today') | rejectattr('has_file') | list %}
+            {% if aired_missing %}
+            <div class="bg-amber-950/25 border border-amber-700/40 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <span class="font-bold text-amber-300">⚡ Aired &amp; Missing ({{ aired_missing|length }}):</span>
+                    {% for item in aired_missing %}
+                    <span class="inline-flex items-center gap-1.5 bg-slate-900 border border-amber-700/40 rounded-lg px-2.5 py-1">
+                        <a href="/media/{{ item.media_id }}" class="font-semibold text-slate-100 hover:text-indigo-300">{{ item.title }}</a>
+                        <span class="text-amber-300 font-mono text-[11px]">{{ item.subtitle.split(' • ')[0] }}</span>
+                        {% if item.kind == 'tv' %}
+                        <button type="button" onclick="huntCalendarEp({{ item.id }}, this)"
+                                class="ml-1 bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded">
+                            🔎 Hunt
+                        </button>
+                        {% endif %}
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- 7-Column Calendar Grid -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+                <div class="grid grid-cols-7 bg-slate-950/90 border-b border-slate-800 text-center text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    <div class="py-2.5">Sun</div>
+                    <div class="py-2.5">Mon</div>
+                    <div class="py-2.5">Tue</div>
+                    <div class="py-2.5">Wed</div>
+                    <div class="py-2.5">Thu</div>
+                    <div class="py-2.5">Fri</div>
+                    <div class="py-2.5">Sat</div>
+                </div>
+                <div class="divide-y divide-slate-800">
+                    {% for week in calendar_weeks %}
+                    <div class="grid grid-cols-7 divide-x divide-slate-800">
+                        {% for cell in week %}
+                        <div class="min-h-[128px] p-2 flex flex-col gap-1.5 {{ 'bg-indigo-950/20 ring-1 ring-inset ring-indigo-500/40' if cell.is_today else ('bg-slate-900/60' if cell.in_month else 'bg-slate-950/50 opacity-60') }}">
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs font-bold {{ 'bg-indigo-600 text-white px-2 py-0.5 rounded-full' if cell.is_today else ('text-slate-200' if cell.in_month else 'text-slate-500') }}">
+                                    {{ cell.day }}
+                                </span>
+                                {% if cell.entries|length > 0 %}
+                                <span class="text-[10px] text-slate-500 font-mono">{{ cell.entries|length }}</span>
+                                {% endif %}
+                            </div>
+
+                            <div class="space-y-1 overflow-y-auto max-h-[145px] pr-0.5">
+                                {% for entry in cell.entries %}
+                                {% set pill_state = 'available' if entry.has_file else ('missing' if entry.is_past_or_today else 'upcoming') %}
+                                <div data-cal-state="{{ pill_state }}"
+                                     class="cal-pill rounded-md px-2 py-1 text-[11px] leading-tight border transition
+                                     {{ 'bg-emerald-950/70 border-emerald-700/50 text-emerald-200' if entry.has_file else ('bg-amber-950/70 border-amber-700/50 text-amber-200' if entry.is_past_or_today else 'bg-sky-950/60 border-sky-800/50 text-sky-200') }}">
+                                    <div class="flex items-center justify-between gap-1">
+                                        <a href="/media/{{ entry.media_id }}" title="{{ entry.title }} — {{ entry.subtitle }}"
+                                           class="font-semibold truncate hover:underline">
+                                            {{ entry.title }}
+                                        </a>
+                                        {% if not entry.has_file and entry.is_past_or_today and entry.kind == 'tv' %}
+                                        <button type="button" onclick="huntCalendarEp({{ entry.id }}, this)" title="Hunt Episode Now"
+                                                class="shrink-0 bg-amber-600 hover:bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.2 rounded">
+                                            Hunt
+                                        </button>
+                                        {% endif %}
+                                    </div>
+                                    <div class="text-[10px] opacity-80 font-mono truncate">
+                                        {{ entry.subtitle }}
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endfor %}
+                </div>
             </div>
         </div>
+        <script>
+        function filterCalPills(state, btn) {
+            document.querySelectorAll('.cal-filter-btn').forEach(b => {
+                b.classList.remove('bg-indigo-600', 'text-white');
+                b.classList.add('bg-slate-800');
+            });
+            btn.classList.remove('bg-slate-800');
+            btn.classList.add('bg-indigo-600', 'text-white');
+            document.querySelectorAll('.cal-pill').forEach(el => {
+                el.style.display = (state === 'all' || el.dataset.calState === state) ? '' : 'none';
+            });
+        }
+        async function syncCalendarNow() {
+            try {
+                await fetch('/api/calendar/sync', { method: 'POST' });
+                if (typeof pollBgTasks === 'function') pollBgTasks();
+            } catch (e) {}
+        }
+        async function huntCalendarEp(epId, btn) {
+            const orig = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '...';
+            try {
+                const res = await fetch(`/api/calendar/hunt-ep/${epId}`, { method: 'POST' });
+                const data = await res.json();
+                btn.textContent = data.status === 'grabbed' ? '✓' : '0';
+            } catch (e) {
+                btn.textContent = orig;
+                btn.disabled = false;
+            }
+        }
+        </script>
         {% endif %}
 
         {% if active_tab == 'settings' %}

@@ -19,6 +19,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .database import engine, Base, get_db, SessionLocal
 from .models import MediaItem, EpisodeItem, IndexerConfig, BlacklistedRelease, HistoryEvent, QualityProfile, CustomFormat
 from .services import (
+    sync_calendar_schedules,
+    hunt_aired_calendar_items,
     search_prowlarr, manual_search_prowlarr, send_to_qbittorrent, check_downloads_and_import,
     get_settings, save_settings, get_drive_stats, get_media_roots, sync_posters_from_plex
 )
@@ -31,6 +33,7 @@ async def scheduled_tasks():
     db = SessionLocal()
     try:
         await check_downloads_and_import(db)
+        await hunt_aired_calendar_items(db)
         wanted = db.query(MediaItem).filter(MediaItem.status == "wanted", MediaItem.monitored == True).all()
         for item in wanted:
             query = f"{item.title} {item.year}" if item.year else item.title
@@ -43,6 +46,14 @@ async def scheduled_tasks():
                     item.torrent_hash = t_hash
                     item.status = "downloading"
                     db.commit()
+    finally:
+        db.close()
+
+
+async def calendar_sync_job():
+    db = SessionLocal()
+    try:
+        await sync_calendar_schedules(db)
     finally:
         db.close()
 
@@ -59,6 +70,7 @@ async def lifespan(app: FastAPI):
         pass
     scheduler = AsyncIOScheduler()
     scheduler.add_job(scheduled_tasks, "interval", minutes=2)
+    scheduler.add_job(calendar_sync_job, "interval", hours=6)
     import fcntl as _fcntl
     _sched_lock = open("/tmp/omniarr_scheduler.lock", "w")
     try:
@@ -646,6 +658,143 @@ def download_db_backup():
     src.close()
     return FileResponse(tmp.name, filename="omniarr-backup.db", media_type="application/octet-stream")
 
+
+async def _bg_sync_calendar():
+    db = SessionLocal()
+    try:
+        _update_bg_task("calendar_sync", "Calendar Air-Date Sync", "running", "Fetching TVMaze & TMDB release schedules...")
+        res = await sync_calendar_schedules(db)
+        _update_bg_task(
+            "calendar_sync",
+            "Calendar Air-Date Sync",
+            "done",
+            f"Checked {res.get('shows_checked', 0)} shows • Updated {res.get('updated_episodes', 0)} eps, {res.get('updated_movies', 0)} movies",
+        )
+    except Exception as e:
+        _update_bg_task("calendar_sync", "Calendar Air-Date Sync", "error", str(e))
+    finally:
+        db.close()
+
+@app.post("/api/calendar/sync")
+async def api_sync_calendar():
+    _asyncio.create_task(_bg_sync_calendar())
+    return {"status": "started"}
+
+@app.post("/api/calendar/hunt-ep/{ep_id}")
+async def api_hunt_calendar_episode(ep_id: int, db: Session = Depends(get_db)):
+    ep = db.query(EpisodeItem).filter(EpisodeItem.id == ep_id).first()
+    if not ep:
+        raise HTTPException(status_code=404, detail="Episode not found")
+    show = db.query(MediaItem).filter(MediaItem.id == ep.media_item_id).first()
+    if not show:
+        raise HTTPException(status_code=404, detail="Show not found")
+    tag = f"S{ep.season_number:02d}E{ep.episode_number:02d}"
+    releases = await search_prowlarr(f"{show.title} {tag}", "tv", show.quality_profile, db)
+    if not releases:
+        return {"status": "no_results", "query": f"{show.title} {tag}"}
+    best = releases[0]
+    dl_link = best.get("downloadUrl") or best.get("magnetUrl") or best.get("guid")
+    t_hash = await send_to_qbittorrent(dl_link, show.id, db) if dl_link else None
+    if t_hash:
+        show.torrent_hash = t_hash
+        show.status = "downloading"
+        db.add(HistoryEvent(
+            event_type="grab",
+            media_item_id=show.id,
+            title=f"{show.title} {tag}",
+            detail=f"Manual calendar hunt grabbed: {best.get('title', tag)}",
+        ))
+        db.commit()
+        return {"status": "grabbed", "release": best.get("title", tag)}
+    return {"status": "failed"}
+
+
+@app.get("/favicon.svg")
+@app.get("/favicon.ico")
+def serve_omniarr_favicon():
+    from fastapi.responses import Response
+    svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#6366f1"/>
+          <stop offset="100%" stop-color="#38bdf8"/>
+        </linearGradient>
+      </defs>
+      <rect width="64" height="64" rx="16" fill="#0f172a"/>
+      <rect x="4" y="4" width="56" height="56" rx="13" fill="none" stroke="url(#g)" stroke-width="3.5"/>
+      <circle cx="32" cy="32" r="15" fill="none" stroke="url(#g)" stroke-width="4.5"/>
+      <polygon points="29,24 41,32 29,40" fill="#e0e7ff"/>
+    </svg>"""
+    return Response(content=svg, media_type="image/svg+xml")
+
+
+@app.get("/api/activity/history-30d")
+def api_activity_history_30d(db: Session = Depends(get_db)):
+    from datetime import datetime as _dt, timedelta as _td
+    cutoff = _dt.utcnow() - _td(days=30)
+
+    events = (
+        db.query(HistoryEvent)
+        .filter(HistoryEvent.created_at >= cutoff)
+        .order_by(HistoryEvent.created_at.desc(), HistoryEvent.id.desc())
+        .limit(400)
+        .all()
+    )
+    blacklisted = (
+        db.query(BlacklistedRelease)
+        .filter(BlacklistedRelease.created_at >= cutoff)
+        .order_by(BlacklistedRelease.created_at.desc(), BlacklistedRelease.id.desc())
+        .limit(200)
+        .all()
+    )
+
+    items = []
+    for ev in events:
+        etype = (ev.event_type or "info").lower()
+        cat = "searched" if etype == "search" else ("downloaded" if etype in ("grab", "import", "download") else "other")
+        items.append({
+            "id": f"ev-{ev.id}",
+            "raw_id": ev.id,
+            "category": cat,
+            "event_type": etype,
+            "media_item_id": ev.media_item_id,
+            "title": ev.title or "",
+            "detail": ev.detail or "",
+            "created_at": ev.created_at.strftime("%Y-%m-%d %H:%M") if ev.created_at else "",
+            "ts": ev.created_at.timestamp() if ev.created_at else 0,
+        })
+
+    for bl in blacklisted:
+        items.append({
+            "id": f"bl-{bl.id}",
+            "raw_id": bl.id,
+            "category": "blacklisted",
+            "event_type": "blacklist",
+            "media_item_id": bl.media_item_id,
+            "title": bl.release_title or bl.torrent_hash or "Blacklisted Release",
+            "detail": bl.reason or "Blacklisted",
+            "created_at": bl.created_at.strftime("%Y-%m-%d %H:%M") if bl.created_at else "",
+            "ts": bl.created_at.timestamp() if bl.created_at else 0,
+        })
+
+    items.sort(key=lambda x: x["ts"], reverse=True)
+    counts = {
+        "all": len(items),
+        "searched": sum(1 for x in items if x["category"] == "searched"),
+        "downloaded": sum(1 for x in items if x["category"] == "downloaded"),
+        "blacklisted": sum(1 for x in items if x["category"] == "blacklisted"),
+    }
+    return {"counts": counts, "items": items}
+
+@app.post("/api/activity/unblacklist/{bl_id}")
+def api_unblacklist_release(bl_id: int, db: Session = Depends(get_db)):
+    row = db.query(BlacklistedRelease).filter(BlacklistedRelease.id == bl_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Blacklist entry not found")
+    db.delete(row)
+    db.commit()
+    return {"status": "removed"}
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", q: str = "", media_type: str = "", page: int = 1, msg: str = "", db: Session = Depends(get_db)):
     base_q = db.query(MediaItem)
@@ -737,6 +886,102 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
                 free_gb = round(shutil.disk_usage(p).free / (1024**3), 1)
             root_folders.append({"media_type": m_type, "path": p_str, "exists": exists, "free_gb": free_gb})
 
+
+    import calendar as _pycal
+    from datetime import datetime as _dt, timedelta as _td
+    today_dt = _dt.now().date()
+    today_str = today_dt.strftime("%Y-%m-%d")
+    cal_month_param = (request.query_params.get("cal_month") or "").strip()
+    try:
+        cy, cm = map(int, cal_month_param.split("-"))
+        first_of_month = today_dt.replace(year=cy, month=cm, day=1)
+    except Exception:
+        first_of_month = today_dt.replace(day=1)
+
+    # Sunday-start calendar grid boundaries
+    start_offset = (first_of_month.weekday() + 1) % 7
+    grid_start = first_of_month - _td(days=start_offset)
+    days_in_month = _pycal.monthrange(first_of_month.year, first_of_month.month)[1]
+    last_of_month = first_of_month.replace(day=days_in_month)
+    end_offset = 6 - ((last_of_month.weekday() + 1) % 7)
+    grid_end = last_of_month + _td(days=end_offset)
+
+    prev_month_str = (first_of_month - _td(days=1)).strftime("%Y-%m")
+    next_month_str = (last_of_month + _td(days=1)).strftime("%Y-%m")
+    cal_month_label = first_of_month.strftime("%B %Y")
+    cal_month_str = first_of_month.strftime("%Y-%m")
+
+    start_str = grid_start.strftime("%Y-%m-%d")
+    end_str = grid_end.strftime("%Y-%m-%d")
+
+    cal_eps = (
+        db.query(EpisodeItem, MediaItem)
+        .join(MediaItem, EpisodeItem.media_item_id == MediaItem.id)
+        .filter(EpisodeItem.air_date >= start_str, EpisodeItem.air_date <= end_str)
+        .order_by(EpisodeItem.air_date.asc(), MediaItem.title.asc())
+        .all()
+    )
+    cal_movies = (
+        db.query(MediaItem)
+        .filter(
+            MediaItem.media_type == "movie",
+            MediaItem.release_date >= start_str,
+            MediaItem.release_date <= end_str,
+        )
+        .order_by(MediaItem.release_date.asc(), MediaItem.title.asc())
+        .all()
+    )
+
+    calendar_entries = []
+    for ep, show in cal_eps:
+        calendar_entries.append({
+            "kind": "tv",
+            "id": ep.id,
+            "media_id": show.id,
+            "date": ep.air_date,
+            "title": show.title,
+            "subtitle": f"S{ep.season_number:02d}E{ep.episode_number:02d}" + (f" • {ep.title}" if ep.title else ""),
+            "has_file": bool(ep.has_file),
+            "is_past_or_today": ep.air_date <= today_str,
+            "is_today": ep.air_date == today_str,
+            "poster_url": show.poster_url,
+            "quality_profile": show.quality_profile,
+        })
+    for mov in cal_movies:
+        calendar_entries.append({
+            "kind": "movie",
+            "id": mov.id,
+            "media_id": mov.id,
+            "date": mov.release_date,
+            "title": mov.title,
+            "subtitle": f"Movie Release ({mov.year or ''})".strip(),
+            "has_file": (mov.status == "available"),
+            "is_past_or_today": mov.release_date <= today_str,
+            "is_today": mov.release_date == today_str,
+            "poster_url": mov.poster_url,
+            "quality_profile": mov.quality_profile,
+        })
+    calendar_entries.sort(key=lambda x: (x["date"], x["title"]))
+    by_date = {}
+    for _ce in calendar_entries:
+        by_date.setdefault(_ce["date"], []).append(_ce)
+
+    calendar_weeks = []
+    cur_d = grid_start
+    while cur_d <= grid_end:
+        week_cells = []
+        for _ in range(7):
+            d_iso = cur_d.strftime("%Y-%m-%d")
+            week_cells.append({
+                "iso": d_iso,
+                "day": cur_d.day,
+                "in_month": (cur_d.month == first_of_month.month),
+                "is_today": (d_iso == today_str),
+                "entries": by_date.get(d_iso, []),
+            })
+            cur_d += _td(days=1)
+        calendar_weeks.append(week_cells)
+
     return templates.TemplateResponse("index.html", {
         "request": request,
         "items": items,
@@ -761,6 +1006,13 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
         "total_movies": total_movies,
         "total_tv": total_tv,
         "msg": msg,
+        "calendar_entries": calendar_entries,
+        "today_str": today_str,
+        "calendar_weeks": calendar_weeks,
+        "cal_month_label": cal_month_label,
+        "cal_month_str": cal_month_str,
+        "prev_month_str": prev_month_str,
+        "next_month_str": next_month_str,
     })
 
 @app.get("/api/media/{media_id}/episodes")

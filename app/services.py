@@ -273,6 +273,21 @@ def _find_local_poster_file(file_path: str | None) -> Path | None:
         art = folder / name
         if art.is_file():
             return art
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        top_title = None[0].get("title", "") if None else "No matches"
+        db.add(HistoryEvent(
+            event_type="search",
+            title=f"{query} ({media_type.upper()})",
+            detail=f"{len(None)} result(s) • Top: {top_title[:140]}",
+        ))
+        # Prune search/history logs older than 30 days
+        cutoff_30d = _dt.utcnow() - _td(days=30)
+        db.query(HistoryEvent).filter(HistoryEvent.created_at < cutoff_30d).delete()
+        db.commit()
+    except Exception:
+        db.rollback()
+
     return None
 
 async def _search_plex_poster(title: str, year: int | None, cfg: dict, client: httpx.AsyncClient) -> str:
@@ -631,7 +646,8 @@ async def check_downloads_and_import(db: Session):
 
 
 async def fetch_media_metadata(item: MediaItem, cfg: dict) -> dict:
-    """Fetches synopsis, runtime, release date, rating, and studio from Plex (primary) or TVMaze/iTunes (fallback)."""
+    """Fetches synopsis, runtime, release date, multi-site scores, cast, and critic/user reviews."""
+    import re as _re
     meta = {
         "summary": "",
         "runtime_min": None,
@@ -641,23 +657,35 @@ async def fetch_media_metadata(item: MediaItem, cfg: dict) -> dict:
         "studio": "",
         "backdrop_url": "",
         "genres": [],
+        "tagline": "",
+        "cast": [],       # [{"name": str, "character": str, "photo": str}]
+        "scores": [],     # [{"source": str, "value": str, "badge": str}]
+        "reviews": [],    # [{"source": str, "author": str, "rating": str, "is_critic": bool, "content": str}]
     }
+    clean_title = _re.sub(r"\s*\(\d{4}\)\s*$", "", (item.title or "")).strip()
     plex_url = cfg.get("plex_url", "").split("/web")[0].rstrip("/")
     token = cfg.get("plex_token", "")
-    if plex_url and token:
-        try:
-            async with httpx.AsyncClient(verify=False, timeout=8.0) as client:
+    tmdb_key = (cfg.get("tmdb_api_key") or "").strip()
+    omdb_key = (cfg.get("omdb_api_key") or "").strip()
+
+    async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+        # 1. Plex Metadata (Synopsis, Cast Roles, Critic & Audience Ratings)
+        if plex_url and token:
+            try:
                 r = await client.get(
                     f"{plex_url}/library/search",
-                    params={"query": item.title, "X-Plex-Token": token},
+                    params={"query": clean_title, "X-Plex-Token": token},
                     headers={"Accept": "application/json"},
                 )
                 if r.status_code == 200:
                     hubs = r.json().get("MediaContainer", {}).get("SearchResult", [])
                     for entry in hubs:
                         md = entry.get("Metadata") or {}
-                        if md.get("title", "").lower() == item.title.lower() and (not item.year or md.get("year") == item.year or abs((md.get("year") or 0) - item.year) <= 1):
+                        if md.get("title", "").lower() == clean_title.lower() and (
+                            not item.year or md.get("year") == item.year or abs((md.get("year") or 0) - item.year) <= 1
+                        ):
                             meta["summary"] = md.get("summary") or ""
+                            meta["tagline"] = md.get("tagline") or ""
                             if md.get("duration"):
                                 meta["runtime_min"] = max(1, round(int(md["duration"]) / 60000))
                             meta["release_date"] = md.get("originallyAvailableAt") or meta["release_date"]
@@ -667,120 +695,215 @@ async def fetch_media_metadata(item: MediaItem, cfg: dict) -> dict:
                             if md.get("art"):
                                 meta["backdrop_url"] = f"{plex_url}{md['art']}?X-Plex-Token={token}"
                             meta["genres"] = [g.get("tag") for g in (md.get("Genre") or []) if g.get("tag")]
-                            if meta["summary"]:
-                                return meta
-        except Exception:
-            pass
 
-    # Fallback: TVMaze for TV shows, iTunes Search API for movies (no API key required)
-    try:
-        async with httpx.AsyncClient(verify=False, timeout=8.0) as client:
-            if item.media_type == "tv":
-                r = await client.get("https://api.tvmaze.com/singlesearch/shows", params={"q": item.title})
-                if r.status_code == 200:
-                    d = r.json()
-                    raw_sum = d.get("summary") or ""
-                    meta["summary"] = re.sub(r"<[^>]+>", "", raw_sum).strip()
-                    meta["runtime_min"] = d.get("runtime") or d.get("averageRuntime")
-                    meta["release_date"] = d.get("premiered") or meta["release_date"]
-                    meta["rating"] = str((d.get("rating") or {}).get("average") or "")
-                    meta["studio"] = ((d.get("network") or d.get("webChannel") or {}).get("name")) or ""
-                    meta["genres"] = d.get("genres") or []
-            else:
-                r = await client.get("https://itunes.apple.com/search", params={"term": f"{item.title} {item.year or ''}".strip(), "media": "movie", "limit": 3})
-                if r.status_code == 200:
-                    for res in r.json().get("results", []):
-                        if item.title.lower() in (res.get("trackName") or "").lower():
-                            meta["summary"] = res.get("longDescription") or res.get("shortDescription") or ""
-                            if res.get("trackTimeMillis"):
-                                meta["runtime_min"] = max(1, round(int(res["trackTimeMillis"]) / 60000))
-                            if res.get("releaseDate"):
-                                meta["release_date"] = res["releaseDate"][:10]
-                            meta["content_rating"] = res.get("contentAdvisoryRating") or ""
-                            meta["genres"] = [res.get("primaryGenreName")] if res.get("primaryGenreName") else []
+                            if md.get("rating"):
+                                meta["scores"].append({"source": "Critic Score", "value": f"{md['rating']}/10", "badge": "critic"})
+                            if md.get("audienceRating"):
+                                meta["scores"].append({"source": "Audience Score", "value": f"{md['audienceRating']}/10", "badge": "audience"})
+
+                            # Fetch full Plex item details for complete Role cast list
+                            rk = md.get("ratingKey")
+                            if rk:
+                                r_full = await client.get(
+                                    f"{plex_url}/library/metadata/{rk}",
+                                    params={"X-Plex-Token": token},
+                                    headers={"Accept": "application/json"},
+                                )
+                                if r_full.status_code == 200:
+                                    full_md = (r_full.json().get("MediaContainer", {}).get("Metadata") or [{}])[0]
+                                    for role in (full_md.get("Role") or [])[:16]:
+                                        if role.get("tag"):
+                                            meta["cast"].append({
+                                                "name": role["tag"],
+                                                "character": role.get("role") or "",
+                                                "photo": role.get("thumb") or "",
+                                            })
                             break
-    except Exception:
-        pass
+            except Exception:
+                pass
+
+        # 2. TVMaze (TV Shows: Cast with Photos, Rating, Network, Summary - Zero API Key Needed)
+        if item.media_type == "tv":
+            try:
+                r = await client.get(
+                    "https://api.tvmaze.com/singlesearch/shows",
+                    params={"q": clean_title, "embed": "cast"},
+                )
+                if r.status_code == 200:
+                    tv = r.json()
+                    if not meta["summary"] and tv.get("summary"):
+                        meta["summary"] = _re.sub(r"<[^>]+>", "", tv["summary"]).strip()
+                    if not meta["runtime_min"] and (tv.get("averageRuntime") or tv.get("runtime")):
+                        meta["runtime_min"] = tv.get("averageRuntime") or tv.get("runtime")
+                    if not meta["release_date"] and tv.get("premiered"):
+                        meta["release_date"] = tv["premiered"]
+                    if not meta["genres"] and tv.get("genres"):
+                        meta["genres"] = tv["genres"]
+                    if not meta["studio"]:
+                        net = (tv.get("network") or tv.get("webChannel") or {}).get("name")
+                        if net:
+                            meta["studio"] = net
+                    tv_avg = (tv.get("rating") or {}).get("average")
+                    if tv_avg:
+                        if not meta["rating"]:
+                            meta["rating"] = str(tv_avg)
+                        meta["scores"].append({"source": "TVMaze", "value": f"{tv_avg}/10", "badge": "audience"})
+
+                    cast_list = tv.get("_embedded", {}).get("cast", [])
+                    if cast_list:
+                        # Prefer TVMaze cast since it includes actor portraits
+                        meta["cast"] = []
+                        for c in cast_list[:16]:
+                            person = c.get("person") or {}
+                            char = c.get("character") or {}
+                            img = (person.get("image") or {}).get("medium") or (char.get("image") or {}).get("medium") or ""
+                            if person.get("name"):
+                                meta["cast"].append({
+                                    "name": person["name"],
+                                    "character": char.get("name") or "",
+                                    "photo": img,
+                                })
+            except Exception:
+                pass
+
+        # 3. Apple iTunes Search + Public Customer Reviews RSS (Movies - Zero API Key Needed)
+        if item.media_type == "movie":
+            try:
+                r_it = await client.get(
+                    "https://itunes.apple.com/search",
+                    params={"term": clean_title, "media": "movie", "limit": 5},
+                )
+                if r_it.status_code == 200:
+                    hits = r_it.json().get("results") or []
+                    best_it = None
+                    for h in hits:
+                        if h.get("trackName", "").lower() == clean_title.lower():
+                            best_it = h
+                            break
+                    if not best_it and hits:
+                        best_it = hits[0]
+                    if best_it:
+                        if not meta["summary"] and best_it.get("longDescription"):
+                            meta["summary"] = best_it["longDescription"]
+                        if not meta["content_rating"] and best_it.get("contentAdvisoryRating"):
+                            meta["content_rating"] = best_it["contentAdvisoryRating"]
+                        if not meta["runtime_min"] and best_it.get("trackTimeMillis"):
+                            meta["runtime_min"] = max(1, round(int(best_it["trackTimeMillis"]) / 60000))
+                        if not meta["genres"] and best_it.get("primaryGenreName"):
+                            meta["genres"] = [best_it["primaryGenreName"]]
+                        if not meta["cast"] and best_it.get("artistName"):
+                            meta["studio"] = meta["studio"] or f"Dir. {best_it['artistName']}"
+
+                        track_id = best_it.get("trackId")
+                        if track_id:
+                            r_rev = await client.get(
+                                f"https://itunes.apple.com/us/rss/customerreviews/id={track_id}/sortBy=mostRecent/json"
+                            )
+                            if r_rev.status_code == 200:
+                                entries = (r_rev.json().get("feed") or {}).get("entry") or []
+                                if isinstance(entries, dict):
+                                    entries = [entries]
+                                for ent in entries[:8]:
+                                    content = ((ent.get("content") or {}).get("label") or "").strip()
+                                    author = (((ent.get("author") or {}).get("name") or {}).get("label") or "Viewer").strip()
+                                    stars = ((ent.get("im:rating") or {}).get("label") or "").strip()
+                                    r_title = ((ent.get("title") or {}).get("label") or "").strip()
+                                    if content:
+                                        full_txt = f"{r_title}: {content}" if r_title else content
+                                        meta["reviews"].append({
+                                            "source": "Apple TV / iTunes",
+                                            "author": author,
+                                            "rating": f"{stars}/5 ★" if stars else "",
+                                            "is_critic": False,
+                                            "content": full_txt[:700],
+                                        })
+            except Exception:
+                pass
+
+        # 4. TMDB Credits, User Score & Critic/User Reviews (when TMDB API Key is configured)
+        if tmdb_key:
+            try:
+                kind = "movie" if item.media_type == "movie" else "tv"
+                s_params = {"api_key": tmdb_key, "query": clean_title}
+                if item.year:
+                    s_params["year" if kind == "movie" else "first_air_date_year"] = item.year
+                r_s = await client.get(f"https://api.themoviedb.org/3/search/{kind}", params=s_params)
+                if r_s.status_code == 200:
+                    res_list = r_s.json().get("results") or []
+                    if res_list:
+                        tmdb_id = res_list[0]["id"]
+                        r_d = await client.get(
+                            f"https://api.themoviedb.org/3/{kind}/{tmdb_id}",
+                            params={"api_key": tmdb_key, "append_to_response": "credits,reviews"},
+                        )
+                        if r_d.status_code == 200:
+                            td = r_d.json()
+                            if not meta["summary"] and td.get("overview"):
+                                meta["summary"] = td["overview"]
+                            if not meta["tagline"] and td.get("tagline"):
+                                meta["tagline"] = td["tagline"]
+                            if td.get("backdrop_path") and not meta["backdrop_url"]:
+                                meta["backdrop_url"] = f"https://image.tmdb.org/t/p/w1280{td['backdrop_path']}"
+                            if td.get("vote_average"):
+                                score_val = round(float(td["vote_average"]), 1)
+                                meta["scores"].append({
+                                    "source": f"TMDB ({td.get('vote_count', 0)} votes)",
+                                    "value": f"{score_val}/10",
+                                    "badge": "audience",
+                                })
+                            credits = (td.get("credits") or {}).get("cast") or []
+                            if credits:
+                                meta["cast"] = []
+                                for c in credits[:16]:
+                                    photo = f"https://image.tmdb.org/t/p/w185{c['profile_path']}" if c.get("profile_path") else ""
+                                    meta["cast"].append({
+                                        "name": c.get("name", ""),
+                                        "character": c.get("character", ""),
+                                        "photo": photo,
+                                    })
+                            for rv in ((td.get("reviews") or {}).get("results") or [])[:8]:
+                                r_author = rv.get("author") or "TMDB Reviewer"
+                                r_rating = (rv.get("author_details") or {}).get("rating")
+                                r_body = (rv.get("content") or "").strip()
+                                if r_body:
+                                    meta["reviews"].append({
+                                        "source": "TMDB Community",
+                                        "author": r_author,
+                                        "rating": f"{r_rating}/10 ★" if r_rating else "",
+                                        "is_critic": False,
+                                        "content": r_body[:750],
+                                    })
+            except Exception:
+                pass
+
+        # 5. OMDb Multi-Site Critic Scores (IMDb, Rotten Tomatoes, Metacritic - if OMDb key configured)
+        if omdb_key:
+            try:
+                o_params = {"apikey": omdb_key, "t": clean_title, "type": ("movie" if item.media_type == "movie" else "series")}
+                if item.year:
+                    o_params["y"] = item.year
+                r_o = await client.get("https://www.omdbapi.com/", params=o_params)
+                if r_o.status_code == 200:
+                    od = r_o.json()
+                    if od.get("Response") == "True":
+                        for rt in (od.get("Ratings") or []):
+                            src = rt.get("Source", "")
+                            val = rt.get("Value", "")
+                            if "Internet Movie Database" in src:
+                                meta["scores"].append({"source": "IMDb", "value": val, "badge": "audience"})
+                            elif "Rotten Tomatoes" in src:
+                                meta["scores"].append({"source": "Rotten Tomatoes", "value": val, "badge": "critic"})
+                            elif "Metacritic" in src:
+                                meta["scores"].append({"source": "Metacritic", "value": val, "badge": "critic"})
+                        if not meta["cast"] and od.get("Actors"):
+                            for actor_name in od["Actors"].split(","):
+                                if actor_name.strip():
+                                    meta["cast"].append({"name": actor_name.strip(), "character": "", "photo": ""})
+            except Exception:
+                pass
+
     return meta
 
-
-def move_media_folder(item: MediaItem, new_parent_dir: str, transfer_files: bool, db: Session) -> dict:
-    """Moves a show or movie folder to a new root directory and optionally auto-transfers all existing files."""
-    cfg = get_settings(db)
-    parent = Path(new_parent_dir.strip())
-    if not str(parent) or str(parent) == ".":
-        raise ValueError("Destination folder path is required.")
-
-    fmt_key = f"{item.media_type}_folder_format"
-    template = cfg.get(fmt_key, "{Title} ({Year})")
-    folder_name = template.replace("{Title}", item.title).replace("{Year}", str(item.year or "")).replace("()", "").strip()
-    clean_name = re.sub(r'[\\/*?:"<>|]', "", folder_name)
-    new_target = parent / clean_name
-
-    def _resolve_existing_path(raw_p: str) -> Path | None:
-        if not raw_p:
-            return None
-        norm = raw_p.replace(chr(92), "/")
-        direct = Path(norm)
-        if direct.exists():
-            return direct
-        # Translate Windows drive letter (e.g. D:/Media/Movies/... -> /mnt/media_d/Media/Movies/...)
-        m_drv = re.match(r"^([a-zA-Z]):/(.*)$", norm)
-        if m_drv:
-            drv = m_drv.group(1).lower()
-            rest = m_drv.group(2)
-            for base in [f"/mnt/plex_{drv}", f"/mnt/{drv}"]:
-                cand = Path(base) / rest
-                if cand.exists():
-                    return cand
-        return direct
-
-    old_path = _resolve_existing_path(item.file_path)
-    moved_files = 0
-
-    if transfer_files and old_path and old_path.exists():
-        if old_path.resolve() == new_target.resolve():
-            return {"ok": True, "new_path": str(new_target), "moved_files": 0, "note": "Already at destination"}
-        new_target.mkdir(parents=True, exist_ok=True)
-        if old_path.is_file():
-            dst_file = new_target / old_path.name
-            shutil.move(str(old_path), str(dst_file))
-            moved_files = 1
-        elif old_path.is_dir():
-            for root, _, files in os.walk(old_path):
-                rel_dir = Path(root).relative_to(old_path)
-                dest_dir = new_target / rel_dir
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                for f in files:
-                    src_f = Path(root) / f
-                    dst_f = dest_dir / f
-                    if not dst_f.exists():
-                        shutil.move(str(src_f), str(dst_f))
-                        moved_files += 1
-            # Clean up empty leftover source directories
-            for root, dirs, files in os.walk(old_path, topdown=False):
-                try:
-                    if not os.listdir(root):
-                        os.rmdir(root)
-                except OSError:
-                    pass
-    else:
-        new_target.mkdir(parents=True, exist_ok=True)
-
-    # Update MediaItem and any EpisodeItem paths in SQLite
-    old_prefix = str(old_path) if old_path else ""
-    item.file_path = str(new_target)
-    if transfer_files and moved_files > 0:
-        item.status = "available"
-
-    episodes = db.query(EpisodeItem).filter_by(media_item_id=item.id).all()
-    for ep in episodes:
-        if ep.file_path and old_prefix and ep.file_path.startswith(old_prefix):
-            rel_ep = ep.file_path[len(old_prefix):].lstrip("/\\")
-            ep.file_path = str(new_target / rel_ep)
-
-    db.commit()
-    return {"ok": True, "new_path": str(new_target), "moved_files": moved_files}
 
 
 async def send_notification(title: str, message: str, cfg: dict):
@@ -1179,3 +1302,238 @@ async def get_poster_candidates(db: Session, item: MediaItem) -> list[dict]:
             pass
 
     return results
+
+
+def move_media_folder(item: MediaItem, new_parent_dir: str, transfer_files: bool, db: Session) -> dict:
+    """Moves a show or movie folder to a new root directory and optionally auto-transfers all existing files."""
+    cfg = get_settings(db)
+    parent = Path(new_parent_dir.strip())
+    if not str(parent) or str(parent) == ".":
+        raise ValueError("Destination folder path is required.")
+
+    fmt_key = f"{item.media_type}_folder_format"
+    template = cfg.get(fmt_key, "{Title} ({Year})")
+    folder_name = template.replace("{Title}", item.title).replace("{Year}", str(item.year or "")).replace("()", "").strip()
+    clean_name = re.sub(r'[\\/*?:"<>|]', "", folder_name)
+    new_target = parent / clean_name
+
+    def _resolve_existing_path(raw_p: str) -> Path | None:
+        if not raw_p:
+            return None
+        norm = raw_p.replace(chr(92), "/")
+        direct = Path(norm)
+        if direct.exists():
+            return direct
+        # Translate Windows drive letter (e.g. D:/Media/Movies/... -> /mnt/media_d/Media/Movies/...)
+        m_drv = re.match(r"^([a-zA-Z]):/(.*)$", norm)
+        if m_drv:
+            drv = m_drv.group(1).lower()
+            rest = m_drv.group(2)
+            for base in [f"/mnt/plex_{drv}", f"/mnt/{drv}"]:
+                cand = Path(base) / rest
+                if cand.exists():
+                    return cand
+        return direct
+
+    old_path = _resolve_existing_path(item.file_path)
+    moved_files = 0
+
+    if transfer_files and old_path and old_path.exists():
+        if old_path.resolve() == new_target.resolve():
+            return {"ok": True, "new_path": str(new_target), "moved_files": 0, "note": "Already at destination"}
+        new_target.mkdir(parents=True, exist_ok=True)
+        if old_path.is_file():
+            dst_file = new_target / old_path.name
+            shutil.move(str(old_path), str(dst_file))
+            moved_files = 1
+        elif old_path.is_dir():
+            for root, _, files in os.walk(old_path):
+                rel_dir = Path(root).relative_to(old_path)
+                dest_dir = new_target / rel_dir
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                for f in files:
+                    src_f = Path(root) / f
+                    dst_f = dest_dir / f
+                    if not dst_f.exists():
+                        shutil.move(str(src_f), str(dst_f))
+                        moved_files += 1
+            # Clean up empty leftover source directories
+            for root, dirs, files in os.walk(old_path, topdown=False):
+                try:
+                    if not os.listdir(root):
+                        os.rmdir(root)
+                except OSError:
+                    pass
+    else:
+        new_target.mkdir(parents=True, exist_ok=True)
+
+    # Update MediaItem and any EpisodeItem paths in SQLite
+    old_prefix = str(old_path) if old_path else ""
+    item.file_path = str(new_target)
+    if transfer_files and moved_files > 0:
+        item.status = "available"
+
+    episodes = db.query(EpisodeItem).filter_by(media_item_id=item.id).all()
+    for ep in episodes:
+        if ep.file_path and old_prefix and ep.file_path.startswith(old_prefix):
+            rel_ep = ep.file_path[len(old_prefix):].lstrip("/\\")
+            ep.file_path = str(new_target / rel_ep)
+
+    db.commit()
+    return {"ok": True, "new_path": str(new_target), "moved_files": moved_files}
+
+async def sync_calendar_schedules(db) -> dict:
+    """Sync upcoming/recent TV episode air dates (TVMaze) and movie release dates (TMDB)."""
+    import asyncio, re
+    import httpx
+    from .models import MediaItem, EpisodeItem
+
+    cfg = get_settings(db)
+    tmdb_key = (cfg.get("tmdb_api_key") or "").strip()
+    updated_eps = 0
+    updated_movies = 0
+    shows_checked = 0
+    errors = 0
+
+    monitored_shows = db.query(MediaItem).filter(
+        MediaItem.media_type == "tv",
+        MediaItem.monitored == True,
+    ).all()
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for show in monitored_shows:
+            clean_title = re.sub(r"\s*\(\d{4}\)\s*$", "", (show.title or "")).strip()
+            if not clean_title:
+                continue
+            try:
+                resp = await client.get(
+                    "https://api.tvmaze.com/singlesearch/shows",
+                    params={"q": clean_title, "embed": "episodes"},
+                )
+                if resp.status_code == 429:
+                    await asyncio.sleep(2.5)
+                    resp = await client.get(
+                        "https://api.tvmaze.com/singlesearch/shows",
+                        params={"q": clean_title, "embed": "episodes"},
+                    )
+                if resp.status_code != 200:
+                    continue
+                shows_checked += 1
+                data = resp.json()
+                episodes = data.get("_embedded", {}).get("episodes", [])
+                for ep in episodes:
+                    s_num = ep.get("season")
+                    e_num = ep.get("number")
+                    airdate = (ep.get("airdate") or "").strip()
+                    ep_title = (ep.get("name") or "").strip()
+                    if not s_num or not e_num or not airdate:
+                        continue
+                    existing = db.query(EpisodeItem).filter(
+                        EpisodeItem.media_item_id == show.id,
+                        EpisodeItem.season_number == s_num,
+                        EpisodeItem.episode_number == e_num,
+                    ).first()
+                    if existing:
+                        if existing.air_date != airdate or (ep_title and not existing.title):
+                            existing.air_date = airdate
+                            if ep_title and not existing.title:
+                                existing.title = ep_title
+                            updated_eps += 1
+                    else:
+                        db.add(EpisodeItem(
+                            media_item_id=show.id,
+                            season_number=s_num,
+                            episode_number=e_num,
+                            title=ep_title,
+                            air_date=airdate,
+                            has_file=False,
+                        ))
+                        updated_eps += 1
+                if shows_checked % 15 == 0:
+                    db.commit()
+                    await asyncio.sleep(0.5)
+            except Exception:
+                errors += 1
+                continue
+
+        if tmdb_key:
+            monitored_movies = db.query(MediaItem).filter(
+                MediaItem.media_type == "movie",
+                MediaItem.monitored == True,
+            ).all()
+            for mov in monitored_movies:
+                if mov.release_date and mov.status == "available":
+                    continue
+                clean_mov = re.sub(r"\s*\(\d{4}\)\s*$", "", (mov.title or "")).strip()
+                try:
+                    params = {"api_key": tmdb_key, "query": clean_mov}
+                    if mov.year:
+                        params["year"] = mov.year
+                    r = await client.get("https://api.themoviedb.org/3/search/movie", params=params)
+                    if r.status_code == 200:
+                        results = r.json().get("results") or []
+                        if results and results[0].get("release_date"):
+                            rel = results[0]["release_date"].strip()
+                            if mov.release_date != rel:
+                                mov.release_date = rel
+                                updated_movies += 1
+                except Exception:
+                    errors += 1
+                    continue
+
+    db.commit()
+    return {
+        "shows_checked": shows_checked,
+        "updated_episodes": updated_eps,
+        "updated_movies": updated_movies,
+        "tmdb_configured": bool(tmdb_key),
+        "errors": errors,
+    }
+
+
+async def hunt_aired_calendar_items(db) -> int:
+    """Automatically search and grab newly aired missing episodes and released wanted movies."""
+    from datetime import datetime
+    from .models import MediaItem, EpisodeItem, HistoryEvent
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    grabbed = 0
+
+    due_episodes = (
+        db.query(EpisodeItem, MediaItem)
+        .join(MediaItem, EpisodeItem.media_item_id == MediaItem.id)
+        .filter(
+            MediaItem.monitored == True,
+            EpisodeItem.has_file == False,
+            EpisodeItem.air_date != "",
+            EpisodeItem.air_date <= today_str,
+        )
+        .order_by(EpisodeItem.air_date.desc())
+        .limit(8)
+        .all()
+    )
+
+    for ep, show in due_episodes:
+        tag = f"S{ep.season_number:02d}E{ep.episode_number:02d}"
+        query = f"{show.title} {tag}"
+        try:
+            releases = await search_prowlarr(query, "tv", show.quality_profile, db)
+            if releases:
+                best = releases[0]
+                dl_link = best.get("downloadUrl") or best.get("magnetUrl") or best.get("guid")
+                t_hash = await send_to_qbittorrent(dl_link, show.id, db) if dl_link else None
+                if t_hash:
+                    show.torrent_hash = t_hash
+                    show.status = "downloading"
+                    db.add(HistoryEvent(
+                        event_type="grab",
+                        media_item_id=show.id,
+                        title=f"{show.title} {tag}",
+                        detail=f"Calendar auto-hunt grabbed: {best.get('title', query)}",
+                    ))
+                    grabbed += 1
+        except Exception:
+            continue
+
+    db.commit()
+    return grabbed
