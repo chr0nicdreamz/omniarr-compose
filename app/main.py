@@ -1500,8 +1500,6 @@ async def seerr_command(payload: dict, background_tasks: BackgroundTasks, db: Se
         "body": payload,
     }
 
-<<<<<<< HEAD
-=======
 @app.get("/api/v3/queue", dependencies=[Depends(verify_api_key)])
 def seerr_get_queue(includeEpisode: bool = False, db: Session = Depends(get_db)):
     downloading = db.query(MediaItem).filter(MediaItem.status == "downloading").all()
@@ -1543,7 +1541,6 @@ def seerr_get_queue_status(db: Session = Depends(get_db)):
         "failedPendingCount": 0,
     }
 
->>>>>>> main
 
 # === ONE-STOP HUB API ROUTES: TAUTULLI, LIBRARY HEALTH AUDITOR & COLLECTIONS ===
 @app.get("/api/tautulli/overview")
