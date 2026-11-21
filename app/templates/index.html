@@ -138,7 +138,10 @@
         <div class="media-card bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-slate-700 transition flex flex-col">
             <div class="card-inner flex flex-col h-full">
                 <!-- Poster Container (Large 2:3 in Grid, 24x36 in List) -->
-                <div class="poster-box relative w-full aspect-[2/3] bg-slate-800 overflow-hidden flex-shrink-0">
+                <div class="poster-box group relative w-full aspect-[2/3] bg-slate-800 overflow-hidden flex-shrink-0">
+                    <label onclick="event.stopPropagation()" class="absolute top-2 left-2 z-20 inline-flex items-center justify-center w-6 h-6 rounded-md bg-slate-950/80 border border-slate-600/80 cursor-pointer opacity-80 hover:opacity-100 transition" title="Select for bulk action">
+                        <input type="checkbox" value="{{ item.id }}" onchange="toggleBulkCard(this)" class="omni-bulk-cb w-3.5 h-3.5 rounded accent-indigo-500 cursor-pointer">
+                    </label>
                     {% if item.poster_url %}
                     <img loading="lazy" decoding="async" src="{{ item.poster_url }}" alt="{{ item.title }}" class="w-full h-full object-cover" loading="lazy">
                     {% else %}
@@ -784,7 +787,20 @@
         </div>
 
         {% if settings_section == 'media' %}
-        <div class="grid md:grid-cols-2 gap-6">
+        <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                    <h3 class="text-base font-semibold text-indigo-300">🎯 One-Click TRaSH-Guides Scoring Presets</h3>
+                    <span id="trash-preset-msg" class="text-xs text-emerald-400"></span>
+                </div>
+                <p class="text-xs text-slate-400">Install curated regex scoring rules to prioritize HDR10/Dolby Vision, Atmos, and HEVC/AV1 while blocking CAM/TS/hardcoded-sub releases.</p>
+                <div class="flex flex-wrap gap-2 text-xs">
+                    <button type="button" onclick="installTrashPreset('4k_hdr_atmos')" class="bg-purple-950/70 hover:bg-purple-900/70 border border-purple-500/40 text-purple-200 px-3 py-1.5 rounded-lg font-medium">+ 4K HDR10 / DV + Atmos</button>
+                    <button type="button" onclick="installTrashPreset('balanced_1080p_hevc')" class="bg-sky-950/70 hover:bg-sky-900/70 border border-sky-500/40 text-sky-200 px-3 py-1.5 rounded-lg font-medium">+ Balanced 1080p HEVC/x265</button>
+                    <button type="button" onclick="installTrashPreset('block_cam_hc')" class="bg-rose-950/70 hover:bg-rose-900/70 border border-rose-500/40 text-rose-200 px-3 py-1.5 rounded-lg font-medium">+ Block CAM / TS / Hardcoded Subs</button>
+                    <button type="button" onclick="installTrashPreset('prefer_proper_repack')" class="bg-emerald-950/70 hover:bg-emerald-900/70 border border-emerald-500/40 text-emerald-200 px-3 py-1.5 rounded-lg font-medium">+ Prefer Proper / Repack</button>
+                </div>
+            </div>
+            <div class="grid md:grid-cols-2 gap-6">
             <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
                 <input type="hidden" name="section" value="media">
                 <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">Importing & Naming</h2>
@@ -983,7 +999,29 @@
                     <label class="block text-xs text-slate-400 mb-1">Must Not Contain / Blocked Terms</label>
                     <input type="text" name="blocked_keywords" value="{{ cfg.blocked_keywords }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono text-rose-300">
                 </div>
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save Profiles</button>
+                <div class="border-t border-slate-800 pt-4 mt-2 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <h3 class="text-sm font-bold text-indigo-300">🤖 Automated Hunting &amp; Quality Cutoff Upgrades</h3>
+                        <button type="button" onclick="runAutomationNow(this)" class="bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/40 text-emerald-300 px-3 py-1 rounded text-xs font-semibold">⚡ Run Hunt Now</button>
+                    </div>
+                    <div class="grid sm:grid-cols-2 gap-3 text-xs">
+                        <label class="flex items-center gap-2.5 bg-slate-950 border border-slate-800 rounded-lg p-3 cursor-pointer">
+                            <input type="checkbox" name="auto_hunt_enabled" value="true" {{ 'checked' if cfg.auto_hunt_enabled != 'false' }} class="w-4 h-4 accent-indigo-500">
+                            <span>
+                                <strong class="block text-slate-200">Auto-Hunt Aired Calendar &amp; Wanted</strong>
+                                <span class="text-slate-400">Automatically search &amp; grab released episodes/movies every 2 min</span>
+                            </span>
+                        </label>
+                        <label class="flex items-center gap-2.5 bg-slate-950 border border-slate-800 rounded-lg p-3 cursor-pointer">
+                            <input type="checkbox" name="auto_upgrade_enabled" value="true" {{ 'checked' if cfg.auto_upgrade_enabled == 'true' }} class="w-4 h-4 accent-indigo-500">
+                            <span>
+                                <strong class="block text-slate-200">Auto Quality-Cutoff Upgrades</strong>
+                                <span class="text-slate-400">Upgrade 1080p files to 4K/2160p when profile cutoff allows</span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save Profiles &amp; Automation</button>
             </form>
 
             <div class="grid md:grid-cols-2 gap-6">
@@ -2136,7 +2174,7 @@
                 const h264Box = document.getElementById('health-h264-table');
                 const hList = h.h264_candidates || [];
                 h264Box.innerHTML = hList.length
-                    ? `<table class="w-full text-left"><thead><tr class="border-b border-slate-800 text-slate-400"><th class="py-2">Title</th><th class="py-2">Res</th><th class="py-2">Audio</th><th class="py-2">Size</th></tr></thead><tbody>${hList.map(x => `<tr class="border-t border-slate-800/70"><td class="py-2"><a href="/media/${x.id}" class="text-indigo-300 hover:underline font-medium">${x.title}</a></td><td class="py-2">${x.resolution}</td><td class="py-2">${x.audio}</td><td class="py-2 font-mono text-amber-300">${x.size_gb} GB</td></tr>`).join('')}</tbody></table>`
+                    ? `<table class="w-full text-left"><thead><tr class="border-b border-slate-800 text-slate-400"><th class="py-2">Title</th><th class="py-2">Res</th><th class="py-2">Audio</th><th class="py-2">Size</th></tr></thead><tbody>${hList.map(x => `<tr class="border-t border-slate-800/70"><td class="py-2"><a href="/media/${x.id}" class="text-indigo-300 hover:underline font-medium">${x.title}</a></td><td class="py-2">${x.resolution}</td><td class="py-2">${x.audio}</td><td class="py-2 font-mono text-amber-300">${x.size_gb} GB</td><td class="py-2 text-right"><button type="button" onclick="queueItemTdarr(${x.id}, this)" class="bg-indigo-600/30 hover:bg-indigo-600/60 border border-indigo-500/40 text-indigo-200 px-2.5 py-1 rounded text-[11px]">⚡ Queue Tdarr</button></td></tr>`).join('')}</tbody></table>`
                     : '<div class="text-slate-500">No large H.264 files found—your library is already well compressed!</div>';
 
                 const dupBox = document.getElementById('health-duplicates-list');
@@ -2263,6 +2301,150 @@ ${fpath}?`)) return;
                 }
             }
         }
+    </script>
+
+    <!-- Floating Bulk Library Batch Bar -->
+    <div id="omni-bulk-bar" class="hidden fixed bottom-12 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 backdrop-blur-md border border-indigo-500/60 shadow-2xl rounded-2xl px-4 py-3 flex flex-wrap items-center gap-2.5 text-xs max-w-[95vw]">
+        <span class="font-bold text-indigo-300"><span id="omni-bulk-count">0</span> selected</span>
+        <button type="button" onclick="selectAllVisibleBulk()" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">Select All Visible</button>
+        <span class="text-slate-700">|</span>
+        <select id="omni-bulk-profile" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200">
+            <option value="">Set Profile...</option>
+            {% for p in profiles %}<option value="{{ p.name }}">{{ p.name }}</option>{% endfor %}
+            <option value="2160p">2160p</option>
+            <option value="1080p">1080p</option>
+            <option value="720p">720p</option>
+        </select>
+        <button type="button" onclick="execBulkAction('profile', document.getElementById('omni-bulk-profile').value)" class="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-semibold">Apply</button>
+        {% if root_folders %}
+        <select id="omni-bulk-root" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200 max-w-[180px]">
+            <option value="">Move Drive...</option>
+            {% for rf in root_folders %}<option value="{{ rf.path }}">{{ rf.path }}</option>{% endfor %}
+        </select>
+        <button type="button" onclick="execBulkAction('move', document.getElementById('omni-bulk-root').value)" class="px-2.5 py-1 rounded bg-sky-600 hover:bg-sky-500 text-white font-semibold">Move</button>
+        {% endif %}
+        <button type="button" onclick="execBulkAction('monitor', 'true')" class="px-2.5 py-1 rounded bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 text-emerald-200">Monitor</button>
+        <button type="button" onclick="execBulkAction('search', '')" class="px-2.5 py-1 rounded bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/40 text-amber-200">🔎 Auto-Search</button>
+        <button type="button" onclick="execBulkAction('delete', '')" class="px-2.5 py-1 rounded bg-rose-600/30 hover:bg-rose-600/50 border border-rose-500/40 text-rose-200">🗑 Remove</button>
+        <button type="button" onclick="clearAllBulk()" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400">✕</button>
+    </div>
+
+    <!-- Slim Live qBittorrent Download Footer Ticker -->
+    <div id="omni-qbit-ticker" class="hidden fixed bottom-0 inset-x-0 z-30 bg-slate-950/95 border-t border-slate-800 px-4 py-1.5 text-[11px] flex flex-wrap items-center gap-4">
+        <span class="font-bold text-emerald-400 shrink-0">⬇️ Active Downloads:</span>
+        <div id="omni-qbit-items" class="flex flex-wrap items-center gap-4 overflow-x-auto"></div>
+    </div>
+
+    <script>
+        function getSelectedBulkIds() {
+            return Array.from(document.querySelectorAll('.omni-bulk-cb:checked')).map(cb => parseInt(cb.value, 10));
+        }
+        function toggleBulkCard(cb) {
+            const card = cb.closest('.media-card');
+            if (card) {
+                if (cb.checked) card.classList.add('ring-2', 'ring-indigo-500');
+                else card.classList.remove('ring-2', 'ring-indigo-500');
+            }
+            const ids = getSelectedBulkIds();
+            const bar = document.getElementById('omni-bulk-bar');
+            const cnt = document.getElementById('omni-bulk-count');
+            if (cnt) cnt.textContent = ids.length;
+            if (bar) bar.classList.toggle('hidden', ids.length === 0);
+        }
+        function selectAllVisibleBulk() {
+            document.querySelectorAll('.omni-bulk-cb').forEach(cb => {
+                cb.checked = true;
+                toggleBulkCard(cb);
+            });
+        }
+        function clearAllBulk() {
+            document.querySelectorAll('.omni-bulk-cb').forEach(cb => {
+                cb.checked = false;
+                toggleBulkCard(cb);
+            });
+        }
+        async function execBulkAction(action, value) {
+            const ids = getSelectedBulkIds();
+            if (!ids.length) return;
+            if ((action === 'profile' || action === 'move') && !value) {
+                alert('Choose a target value first.');
+                return;
+            }
+            if (action === 'delete' && !confirm(`Remove ${ids.length} selected items from OmniArr?`)) return;
+            const res = await fetch('/api/library/bulk-action', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ids, action, value})
+            });
+            const data = await res.json();
+            alert(data.message || (data.ok ? 'Done' : 'Failed'));
+            if (data.ok && (action === 'profile' || action === 'delete')) location.reload();
+            else clearAllBulk();
+        }
+
+        async function installTrashPreset(presetKey) {
+            const res = await fetch('/api/automation/trash-preset/' + encodeURIComponent(presetKey), {method: 'POST'});
+            const data = await res.json();
+            const msg = document.getElementById('trash-preset-msg');
+            if (msg) msg.textContent = data.ok ? '✓ TRaSH preset installed! Reloading...' : 'Failed';
+            if (data.ok) setTimeout(() => location.reload(), 700);
+        }
+
+        async function runAutomationNow(btn) {
+            const orig = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '⏳ Running Hunt...';
+            await fetch('/api/automation/run-now', {method: 'POST'});
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.textContent = '✓ Hunt Triggered';
+                setTimeout(() => { btn.textContent = orig; }, 2500);
+            }, 900);
+        }
+
+        async function queueItemTdarr(mediaId, btn) {
+            const orig = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '...';
+            const res = await fetch('/api/health/queue-tdarr', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: mediaId})
+            });
+            const data = await res.json();
+            if (data.ok) {
+                btn.textContent = '✓ Queued';
+                btn.className = 'bg-emerald-600/30 border border-emerald-500/40 text-emerald-200 px-2.5 py-1 rounded text-[11px]';
+            } else {
+                alert(data.message || 'Tdarr queue failed');
+                btn.disabled = false;
+                btn.textContent = orig;
+            }
+        }
+
+        async function pollQbitActiveTicker() {
+            try {
+                const res = await fetch('/api/qbit/active');
+                if (!res.ok) return;
+                const data = await res.json();
+                const list = data.torrents || [];
+                const bar = document.getElementById('omni-qbit-ticker');
+                const box = document.getElementById('omni-qbit-items');
+                if (!bar || !box) return;
+                if (!list.length) {
+                    bar.classList.add('hidden');
+                    return;
+                }
+                bar.classList.remove('hidden');
+                box.innerHTML = list.map(t =>
+                    `<span class="inline-flex items-center gap-2 text-slate-300"><span class="max-w-[220px] truncate font-medium">${t.name}</span><span class="text-emerald-400 font-mono">${t.progress}%</span><span class="text-sky-400 font-mono">${t.dlspeed_mb} MB/s</span></span>`
+                ).join('<span class="text-slate-700">|</span>');
+            } catch (e) {}
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            pollQbitActiveTicker();
+            setInterval(pollQbitActiveTicker, 8000);
+        });
     </script>
 </body>
 </html>

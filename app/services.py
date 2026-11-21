@@ -2016,3 +2016,115 @@ async def scan_franchise_collections(db: Session) -> list:
     res_list = list(collections_map.values())
     res_list.sort(key=lambda c: (c["total_count"] - c["owned_count"], c["name"]), reverse=True)
     return res_list
+
+TRASH_PRESETS = {
+    "4k_hdr_atmos": {
+        "label": "4K HDR10 / Dolby Vision + Atmos",
+        "formats": [
+            {"name": "Dolby Vision / HDR10+", "patterns": [r"\b(DV|DoVi|Dolby[ ._-]?Vision|HDR10Plus|HDR10\+)\b"], "score": 150},
+            {"name": "TrueHD Atmos / DTS-HD MA", "patterns": [r"\b(TrueHD|Atmos|DTS-HD[ ._-]?MA|DTS:X)\b"], "score": 120},
+            {"name": "2160p Remux / WEB-DL", "patterns": [r"\b2160p\b.*\b(Remux|WEB-DL)\b"], "score": 100},
+        ],
+    },
+    "balanced_1080p_hevc": {
+        "label": "Balanced 1080p HEVC / x265",
+        "formats": [
+            {"name": "x265 / HEVC / AV1", "patterns": [r"\b(x265|H\.?265|HEVC|AV1)\b"], "score": 85},
+            {"name": "1080p Bluray / WEB-DL", "patterns": [r"\b1080p\b.*\b(BluRay|WEB-DL|WEBRip)\b"], "score": 60},
+        ],
+    },
+    "block_cam_hc": {
+        "label": "Block CAM / Telesync / Hardcoded Subs",
+        "formats": [
+            {"name": "CAM / TS / Screener Block", "patterns": [r"\b(CAM|HDCAM|TS|HDTS|TELESYNC|TC|WORKPRINT|SCR|DVDSCR)\b"], "score": -10000},
+            {"name": "Hardcoded / KORSUB Block", "patterns": [r"\b(HC|KORSUB|SUBBED|HARDSUB)\b"], "score": -5000},
+        ],
+    },
+    "prefer_proper_repack": {
+        "label": "Prefer Proper / Repack Releases",
+        "formats": [
+            {"name": "PROPER / REPACK", "patterns": [r"\b(PROPER|REPACK|RERIP)\b"], "score": 75},
+        ],
+    },
+}
+
+def apply_trash_preset(db, preset_key: str) -> int:
+    import json
+    from .models import CustomFormat
+    preset = TRASH_PRESETS.get(preset_key)
+    if not preset:
+        return 0
+    added = 0
+    for fmt in preset["formats"]:
+        existing = db.query(CustomFormat).filter_by(name=fmt["name"]).first()
+        if existing:
+            existing.regex_patterns_json = json.dumps(fmt["patterns"])
+            existing.default_score = fmt["score"]
+        else:
+            db.add(CustomFormat(
+                name=fmt["name"],
+                source_app="trash",
+                regex_patterns_json=json.dumps(fmt["patterns"]),
+                default_score=fmt["score"],
+            ))
+            added += 1
+    db.commit()
+    return added
+
+async def hunt_quality_upgrades(db) -> int:
+    """Scan monitored available items whose file quality is below their profile cutoff and grab upgrades."""
+    from .models import MediaItem, QualityProfile, HistoryEvent
+    cfg = get_settings(db)
+    if str(cfg.get("auto_upgrade_enabled", "false")).lower() != "true":
+        return 0
+
+    candidates = (
+        db.query(MediaItem)
+        .filter(MediaItem.monitored == True, MediaItem.status == "available")
+        .order_by(MediaItem.id.desc())
+        .limit(120)
+        .all()
+    )
+    upgraded = 0
+    for item in candidates:
+        if upgraded >= 3:
+            break
+        fp = (item.file_path or "").lower()
+        if not fp:
+            continue
+        prof = db.query(QualityProfile).filter_by(name=item.quality_profile).first()
+        if prof and not prof.upgrade_allowed:
+            continue
+        target = (prof.cutoff if prof else (item.quality_profile or "")).lower()
+        needs_upgrade = False
+        if "2160" in target and "2160" not in fp and "4k" not in fp:
+            needs_upgrade = True
+        elif "1080" in target and not any(k in fp for k in ("1080p", "2160p", "4k")):
+            needs_upgrade = True
+        if not needs_upgrade:
+            continue
+
+        query = f"{item.title} {item.year}" if item.year else item.title
+        try:
+            releases = await search_prowlarr(query, item.media_type, item.quality_profile, db)
+            if releases:
+                best = releases[0]
+                best_title = (best.get("title") or "").lower()
+                if ("2160" in target and ("2160" in best_title or "4k" in best_title)) or ("1080" in target and "1080" in best_title):
+                    dl_link = best.get("downloadUrl") or best.get("magnetUrl") or best.get("guid")
+                    t_hash = await send_to_qbittorrent(dl_link, item.id, db) if dl_link else None
+                    if t_hash:
+                        item.torrent_hash = t_hash
+                        item.status = "downloading"
+                        db.add(HistoryEvent(
+                            event_type="upgrade_grabbed",
+                            media_title=item.title,
+                            details=f"Quality cutoff upgrade ({target}): {best.get('title', '')[:80]}",
+                        ))
+                        upgraded += 1
+        except Exception:
+            continue
+    if upgraded:
+        db.commit()
+    return upgraded
+

@@ -30,22 +30,26 @@ Base.metadata.create_all(bind=engine)
 templates = Jinja2Templates(directory="app/templates")
 
 async def scheduled_tasks():
+    from .services import hunt_quality_upgrades
     db = SessionLocal()
     try:
         await check_downloads_and_import(db)
-        await hunt_aired_calendar_items(db)
-        wanted = db.query(MediaItem).filter(MediaItem.status == "wanted", MediaItem.monitored == True).all()
-        for item in wanted:
-            query = f"{item.title} {item.year}" if item.year else item.title
-            releases = await search_prowlarr(query, item.media_type, item.quality_profile, db)
-            if releases:
-                best = releases[0]
-                dl_link = best.get("downloadUrl") or best.get("magnetUrl") or best.get("guid")
-                t_hash = await send_to_qbittorrent(dl_link, item.id, db) if dl_link else None
-                if t_hash:
-                    item.torrent_hash = t_hash
-                    item.status = "downloading"
-                    db.commit()
+        cfg = get_settings(db)
+        if str(cfg.get("auto_hunt_enabled", "true")).lower() != "false":
+            await hunt_aired_calendar_items(db)
+            wanted = db.query(MediaItem).filter(MediaItem.status == "wanted", MediaItem.monitored == True).limit(15).all()
+            for item in wanted:
+                query = f"{item.title} {item.year}" if item.year else item.title
+                releases = await search_prowlarr(query, item.media_type, item.quality_profile, db)
+                if releases:
+                    best = releases[0]
+                    dl_link = best.get("downloadUrl") or best.get("magnetUrl") or best.get("guid")
+                    t_hash = await send_to_qbittorrent(dl_link, item.id, db) if dl_link else None
+                    if t_hash:
+                        item.torrent_hash = t_hash
+                        item.status = "downloading"
+                        db.commit()
+        await hunt_quality_upgrades(db)
     finally:
         db.close()
 
@@ -1627,4 +1631,128 @@ async def test_service_connection(service: str, request: Request, db: Session = 
         return {"ok": False, "message": f"Unknown service: {service}"}
     except Exception as exc:
         return {"ok": False, "message": f"Connection error: {exc}"}
+
+@app.post("/api/automation/trash-preset/{preset_key}")
+def api_apply_trash_preset(preset_key: str, db: Session = Depends(get_db)):
+    from .services import apply_trash_preset
+    added = apply_trash_preset(db, preset_key)
+    return {"ok": True, "added": added}
+
+@app.post("/api/automation/run-now")
+async def api_run_automation_now():
+    _asyncio.create_task(scheduled_tasks())
+    return {"ok": True}
+
+@app.post("/api/library/bulk-action")
+async def api_library_bulk_action(request: Request, db: Session = Depends(get_db)):
+    data = await request.json()
+    ids = [int(x) for x in (data.get("ids") or []) if str(x).isdigit()]
+    action = (data.get("action") or "").strip()
+    value = (data.get("value") or "").strip()
+    if not ids:
+        return {"ok": False, "message": "No items selected."}
+
+    items = db.query(MediaItem).filter(MediaItem.id.in_(ids)).all()
+    if action == "profile" and value:
+        for it in items:
+            it.quality_profile = value
+        db.commit()
+        return {"ok": True, "message": f"Updated quality profile to {value} for {len(items)} items."}
+    elif action == "monitor":
+        flag = (value.lower() == "true")
+        for it in items:
+            it.monitored = flag
+        db.commit()
+        return {"ok": True, "message": f"Set monitored={flag} for {len(items)} items."}
+    elif action == "move" and value:
+        _asyncio.create_task(_bg_bulk_move(ids, value))
+        return {"ok": True, "message": f"Queued background drive move for {len(items)} items → {value}"}
+    elif action == "search":
+        async def _bg_bulk_search(target_ids: list[int]):
+            sdb = SessionLocal()
+            try:
+                for mid in target_ids:
+                    it = sdb.query(MediaItem).filter_by(id=mid).first()
+                    if not it:
+                        continue
+                    q = f"{it.title} {it.year}" if it.year else it.title
+                    rels = await search_prowlarr(q, it.media_type, it.quality_profile, sdb)
+                    if rels:
+                        dl = rels[0].get("downloadUrl") or rels[0].get("magnetUrl") or rels[0].get("guid")
+                        th = await send_to_qbittorrent(dl, it.id, sdb) if dl else None
+                        if th:
+                            it.torrent_hash = th
+                            it.status = "downloading"
+                            sdb.commit()
+            finally:
+                sdb.close()
+        _asyncio.create_task(_bg_bulk_search(ids))
+        return {"ok": True, "message": f"Started background Prowlarr search for {len(items)} items."}
+    elif action == "delete":
+        for it in items:
+            db.query(EpisodeItem).filter_by(media_item_id=it.id).delete()
+            db.delete(it)
+        db.commit()
+        return {"ok": True, "message": f"Removed {len(items)} items from OmniArr."}
+    return {"ok": False, "message": "Unsupported bulk action."}
+
+@app.get("/api/qbit/active")
+async def api_qbit_active(db: Session = Depends(get_db)):
+    cfg = get_settings(db)
+    q_url = (cfg.get("qbit_url") or "").strip().rstrip("/")
+    if not q_url:
+        return {"torrents": []}
+    try:
+        hdrs = {"Referer": q_url, "Origin": q_url}
+        async with httpx.AsyncClient(verify=False, timeout=4.0) as client:
+            lr = await client.post(
+                f"{q_url}/api/v2/auth/login",
+                data={"username": (cfg.get("qbit_user") or "").strip(), "password": (cfg.get("qbit_pass") or "").strip()},
+                headers=hdrs,
+            )
+            r = await client.get(
+                f"{q_url}/api/v2/torrents/info",
+                params={"filter": "active"},
+                headers=hdrs,
+                cookies=lr.cookies if lr.status_code == 200 else None,
+            )
+            if r.status_code != 200:
+                return {"torrents": []}
+            active = []
+            for t in (r.json() or []):
+                state = (t.get("state") or "").lower()
+                if any(k in state for k in ("dl", "meta", "alloc", "check", "stalleddl")):
+                    active.append({
+                        "name": t.get("name", ""),
+                        "progress": round(float(t.get("progress", 0)) * 100, 1),
+                        "dlspeed_mb": round(float(t.get("dlspeed", 0)) / (1024 * 1024), 2),
+                        "eta": int(t.get("eta", 0)),
+                        "state": t.get("state", ""),
+                    })
+            return {"torrents": active[:6]}
+    except Exception:
+        return {"torrents": []}
+
+@app.post("/api/health/queue-tdarr")
+async def api_health_queue_tdarr(request: Request, db: Session = Depends(get_db)):
+    data = await request.json()
+    media_id = int(data.get("id", 0))
+    item = db.query(MediaItem).filter_by(id=media_id).first()
+    if not item or not item.file_path:
+        return {"ok": False, "message": "Media file path not found."}
+    cfg = get_settings(db)
+    tdarr_url = (cfg.get("tdarr_url") or "").strip().rstrip("/")
+    if not tdarr_url:
+        return {"ok": False, "message": "Configure Tdarr Server URL under Settings → Connect & Backup first."}
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=8.0) as client:
+            resp = await client.post(
+                f"{tdarr_url}/api/v2/scan-files",
+                json={"data": {"scanConfig": {"dbID": "", "arrayOrPath": [item.file_path], "mode": "scanFolderWatcher"}}},
+            )
+            if resp.status_code in (200, 201, 204):
+                return {"ok": True, "message": f"Queued {item.title} in Tdarr!"}
+            return {"ok": False, "message": f"Tdarr returned HTTP {resp.status_code}"}
+    except Exception as exc:
+        return {"ok": False, "message": f"Tdarr connection error: {exc}"}
 
