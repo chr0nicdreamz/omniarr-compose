@@ -1581,6 +1581,8 @@ async def fetch_tautulli_activity(cfg: dict) -> dict:
         return {"configured": True, "error": str(e), "stream_count": 0, "sessions": []}
 
 
+from datetime import datetime, timedelta
+
 async def fetch_tautulli_watch_stats(cfg: dict, items: list) -> dict:
     url = (cfg.get("tautulli_url") or "").rstrip("/")
     key = (cfg.get("tautulli_api_key") or "").strip()
