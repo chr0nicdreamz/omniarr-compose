@@ -110,10 +110,12 @@
                    class="px-3.5 py-2 rounded-lg text-xs font-semibold transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'health' else 'text-slate-300 hover:bg-slate-800' }}">
                     📊 Health &amp; Storage
                 </a>
+{% if cfg.tautulli_url and cfg.tautulli_api_key %}
                 <a href="/?tab=tautulli"
                    class="px-3.5 py-2 rounded-lg text-xs font-semibold transition {{ 'bg-amber-600 text-white shadow' if active_tab == 'tautulli' else 'text-slate-300 hover:bg-slate-800' }}">
                     📺 Tautulli
                 </a>
+                {% endif %}
                 <a href="/?tab=activity"
                    class="px-4 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab in ('activity', 'history') else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
                     📥 Activity &amp; Logs
@@ -1585,7 +1587,73 @@
         <button type="button" onclick="executeBulkMove()" class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white">🚚 Move Selected</button>
         <button type="button" onclick="clearBulkSelection()" class="text-xs text-slate-400 hover:text-slate-200 px-2">Clear</button>
     </div>
-        {% if active_tab == 'collections' %}
+                {% if active_tab == 'tautulli' %}
+        <div class="space-y-6">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-lg font-bold text-amber-300">📺 Tautulli Watch Analytics, Live Streams &amp; Cleanup</h2>
+                    <p class="text-xs text-slate-400">Real-time Plex playback sessions, 30-day top watched leaderboards, recent watch history, and unwatched stale media.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <a href="/?tab=settings&section=connect" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3.5 py-2 rounded-lg text-xs font-medium">
+                        ⚙️ Connection Settings
+                    </a>
+                    <button type="button" onclick="loadDedicatedTautulliTab()" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg text-xs font-semibold">
+                        ↻ Refresh Tautulli
+                    </button>
+                </div>
+            </div>
+
+            <div id="tautulli-tab-status"></div>
+
+            <!-- Live Active Streams -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+                    <h3 class="text-sm font-bold text-amber-300">🔴 Live Active Streams</h3>
+                    <span id="tt-live-bw" class="text-xs font-mono text-slate-400"></span>
+                </div>
+                <div id="tt-live-grid" class="grid md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs text-slate-400">
+                    Loading active streams...
+                </div>
+            </div>
+
+            <!-- 30-Day Top Watched Stats -->
+            <div class="grid lg:grid-cols-3 gap-6">
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                    <h3 class="text-sm font-bold text-indigo-300 border-b border-slate-800 pb-2.5 mb-3">🎬 Top Movies (30 Days)</h3>
+                    <div id="tt-top-movies" class="space-y-2 text-xs text-slate-400">Loading...</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                    <h3 class="text-sm font-bold text-emerald-300 border-b border-slate-800 pb-2.5 mb-3">📺 Top TV Shows (30 Days)</h3>
+                    <div id="tt-top-tv" class="space-y-2 text-xs text-slate-400">Loading...</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                    <h3 class="text-sm font-bold text-amber-300 border-b border-slate-800 pb-2.5 mb-3">👥 Top Viewers (30 Days)</h3>
+                    <div id="tt-top-users" class="space-y-2 text-xs text-slate-400">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Recent Watch History -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <h3 class="text-sm font-bold text-indigo-300 border-b border-slate-800 pb-3 mb-4">🕒 Recent Watch History</h3>
+                <div id="tt-recent-history" class="overflow-x-auto text-xs text-slate-400">Loading watch history...</div>
+            </div>
+
+            <!-- Stale Media Cleanup -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-rose-300">🧹 Stale Media Cleanup (Unwatched 12+ Months)</h3>
+                        <p class="text-xs text-slate-400">Available library items with zero plays or no plays in the past 365 days.</p>
+                    </div>
+                    <span id="tt-stale-count" class="text-xs font-mono text-slate-400"></span>
+                </div>
+                <div id="tt-dedicated-stale" class="overflow-x-auto text-xs text-slate-400">Loading stale media report...</div>
+            </div>
+        </div>
+        {% endif %}
+
+{% if active_tab == 'collections' %}
         <div class="space-y-6">
             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
                 <div>
@@ -1848,18 +1916,54 @@
                     : '<div class="text-slate-500">No user playback stats in the last 30 days.</div>';
 
                 const rw = stats.recent_watches || [];
-                document.getElementById('tt-recent-history').innerHTML = rw.length
-                    ? `<table class="w-full text-left"><thead><tr class="border-b border-slate-800 text-slate-400"><th class="py-2">Title</th><th class="py-2">User</th><th class="py-2">Client</th><th class="py-2">Progress</th><th class="py-2">Watched At</th></tr></thead><tbody>${rw.map(w => `<tr class="border-t border-slate-800/70"><td class="py-2 text-slate-200 font-medium">${w.title}</td><td class="py-2 text-amber-300">${w.user}</td><td class="py-2 text-slate-400">${w.player}</td><td class="py-2 font-mono text-indigo-300">${w.percent_complete}%</td><td class="py-2 text-slate-400 font-mono">${w.date}</td></tr>`).join('')}</tbody></table>`
-                    : '<div class="text-slate-500">No recent watch history entries returned.</div>';
+                window._ttRecentWatches = rw;
+                window._ttRecentExpanded = false;
+                renderTautulliRecentHistory();
 
                 const stales = stats.stale_items || [];
+                window._ttStaleItems = stales;
+                window._ttStaleExpanded = false;
                 document.getElementById('tt-stale-count').textContent = `${stales.length} candidate(s)`;
-                document.getElementById('tt-dedicated-stale').innerHTML = stales.length
-                    ? `<table class="w-full text-left"><thead><tr class="border-b border-slate-800 text-slate-400"><th class="py-2">Title</th><th class="py-2">Type</th><th class="py-2">Total Plays</th><th class="py-2">Last Watched</th><th class="py-2 text-right">Action</th></tr></thead><tbody>${stales.map(s => `<tr class="border-t border-slate-800/70"><td class="py-2"><a href="/media/${s.id}" class="text-indigo-300 hover:underline font-medium">${s.title} ${s.year ? `(${s.year})` : ''}</a></td><td class="py-2 uppercase text-slate-400">${s.media_type}</td><td class="py-2 font-mono">${s.plays}</td><td class="py-2 text-amber-300">${s.last_watched}</td><td class="py-2 text-right"><a href="/media/${s.id}" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 py-1 rounded text-[11px] text-slate-200">Manage</a></td></tr>`).join('')}</tbody></table>`
-                    : '<div class="text-slate-500">All available media has been watched within the last 12 months.</div>';
+                renderTautulliStaleTable();
             } catch (e) {}
         }
         if (document.getElementById('tt-live-grid')) loadDedicatedTautulliTab();
+
+        function renderTautulliRecentHistory() {
+            const box = document.getElementById('tt-recent-history');
+            if (!box) return;
+            const rw = window._ttRecentWatches || [];
+            if (!rw.length) {
+                box.innerHTML = '<div class="text-slate-500">No recent watch history entries returned.</div>';
+                return;
+            }
+            const limit = 8;
+            const expanded = !!window._ttRecentExpanded;
+            const visible = expanded ? rw : rw.slice(0, limit);
+            const rowsHtml = visible.map(w => `<tr class="border-t border-slate-800/70"><td class="py-2 text-slate-200 font-medium">${w.title}</td><td class="py-2 text-amber-300">${w.user}</td><td class="py-2 text-slate-400">${w.player}</td><td class="py-2 font-mono text-indigo-300">${w.percent_complete}%</td><td class="py-2 text-slate-400 font-mono">${w.date}</td></tr>`).join('');
+            const toggleBtn = rw.length > limit
+                ? `<div class="mt-3 pt-3 border-t border-slate-800/70 flex justify-center"><button type="button" onclick="window._ttRecentExpanded = !window._ttRecentExpanded; renderTautulliRecentHistory();" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-1.5 rounded-lg text-xs font-semibold transition">${expanded ? `▲ Show Less (Top ${limit})` : `▼ Show All (${rw.length} Watches)`}</button></div>`
+                : '';
+            box.innerHTML = `<table class="w-full text-left"><thead><tr class="border-b border-slate-800 text-slate-400"><th class="py-2">Title</th><th class="py-2">User</th><th class="py-2">Client</th><th class="py-2">Progress</th><th class="py-2">Watched At</th></tr></thead><tbody>${rowsHtml}</tbody></table>${toggleBtn}`;
+        }
+
+        function renderTautulliStaleTable() {
+            const box = document.getElementById('tt-dedicated-stale');
+            if (!box) return;
+            const stales = window._ttStaleItems || [];
+            if (!stales.length) {
+                box.innerHTML = '<div class="text-slate-500">All available media has been watched within the last 12 months.</div>';
+                return;
+            }
+            const limit = 8;
+            const expanded = !!window._ttStaleExpanded;
+            const visible = expanded ? stales : stales.slice(0, limit);
+            const rowsHtml = visible.map(s => `<tr class="border-t border-slate-800/70"><td class="py-2"><a href="/media/${s.id}" class="text-indigo-300 hover:underline font-medium">${s.title} ${s.year ? `(${s.year})` : ''}</a></td><td class="py-2 uppercase text-slate-400">${s.media_type}</td><td class="py-2 font-mono">${s.plays}</td><td class="py-2 text-amber-300">${s.last_watched}</td><td class="py-2 text-right"><a href="/media/${s.id}" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 py-1 rounded text-[11px] text-slate-200">Manage</a></td></tr>`).join('');
+            const toggleBtn = stales.length > limit
+                ? `<div class="mt-3 pt-3 border-t border-slate-800/70 flex justify-center"><button type="button" onclick="window._ttStaleExpanded = !window._ttStaleExpanded; renderTautulliStaleTable();" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-1.5 rounded-lg text-xs font-semibold transition">${expanded ? `▲ Show Less (Top ${limit})` : `▼ Show More (${stales.length - limit} more items)`}</button></div>`
+                : '';
+            box.innerHTML = `<table class="w-full text-left"><thead><tr class="border-b border-slate-800 text-slate-400"><th class="py-2">Title</th><th class="py-2">Type</th><th class="py-2">Total Plays</th><th class="py-2">Last Watched</th><th class="py-2 text-right">Action</th></tr></thead><tbody>${rowsHtml}</tbody></table>${toggleBtn}`;
+        }
 
         async function loadFranchiseCollections() {
             const grid = document.getElementById('collections-grid');
