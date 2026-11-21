@@ -600,7 +600,9 @@ async def service_health(force: bool = False, db: Session = Depends(get_db)):
         async with httpx.AsyncClient(verify=False, timeout=4.0) as client:
             if status["prowlarr"]["configured"]:
                 try:
-                    r = await client.get(f"{cfg['prowlarr_url'].rstrip('/')}/api/v1/system/status", headers={"X-Api-Key": cfg["prowlarr_api_key"]})
+                    p_url = (cfg.get("prowlarr_url") or "").strip().rstrip("/")
+                    p_key = (cfg.get("prowlarr_api_key") or "").strip()
+                    r = await client.get(f"{p_url}/api/v1/system/status", headers={"X-Api-Key": p_key})
                     status["prowlarr"]["ok"] = (r.status_code == 200)
                 except Exception:
                     pass
@@ -1546,3 +1548,83 @@ async def api_collections_grab_missing(payload: dict, background_tasks: Backgrou
         if item.status != "available":
             background_tasks.add_task(auto_search_and_grab_item, item.id)
     return {"ok": True, "added": added}
+
+@app.post("/api/test-connection/{service}")
+async def test_service_connection(service: str, request: Request, db: Session = Depends(get_db)):
+    """Test live connection to Prowlarr, qBittorrent, Plex, Jellyfin, or Emby using form or saved credentials."""
+    _HEALTH_CACHE["ts"] = 0.0
+    _HEALTH_CACHE["data"] = None
+    cfg = get_settings(db)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    svc = service.strip().lower()
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=6.0) as client:
+            if svc == "prowlarr":
+                url = (payload.get("prowlarr_url") or cfg.get("prowlarr_url") or "").strip().rstrip("/")
+                key = (payload.get("prowlarr_api_key") or cfg.get("prowlarr_api_key") or "").strip()
+                if not url or not key:
+                    return {"ok": False, "message": "Enter both Prowlarr URL and API Key first."}
+                r = await client.get(f"{url}/api/v1/system/status", headers={"X-Api-Key": key})
+                if r.status_code == 200:
+                    ver = (r.json() or {}).get("version", "connected")
+                    return {"ok": True, "message": f"Connected to Prowlarr (v{ver})"}
+                return {"ok": False, "message": f"Prowlarr returned HTTP {r.status_code} — verify API Key."}
+
+            if svc in ("qbittorrent", "qbit"):
+                url = (payload.get("qbit_url") or cfg.get("qbit_url") or "").strip().rstrip("/")
+                user = (payload.get("qbit_user") or cfg.get("qbit_user") or "").strip()
+                pwd = (payload.get("qbit_pass") or cfg.get("qbit_pass") or "").strip()
+                if not url:
+                    return {"ok": False, "message": "Enter qBittorrent URL first."}
+                hdrs = {"Referer": url, "Origin": url}
+                lr = await client.post(f"{url}/api/v2/auth/login", data={"username": user, "password": pwd}, headers=hdrs)
+                if lr.status_code == 200 and lr.text.strip() == "Ok.":
+                    vr = await client.get(f"{url}/api/v2/app/version", headers=hdrs, cookies=lr.cookies)
+                    ver = vr.text.strip() if vr.status_code == 200 else "connected"
+                    return {"ok": True, "message": f"Connected to qBittorrent ({ver})"}
+                vr = await client.get(f"{url}/api/v2/app/version", headers=hdrs)
+                if vr.status_code == 200:
+                    return {"ok": True, "message": f"Connected to qBittorrent ({vr.text.strip()})"}
+                return {"ok": False, "message": f"qBittorrent login failed (HTTP {lr.status_code})."}
+
+            if svc == "plex":
+                url = (payload.get("plex_url") or cfg.get("plex_url") or "").strip().rstrip("/")
+                tok = (payload.get("plex_token") or cfg.get("plex_token") or "").strip()
+                if not url or not tok:
+                    return {"ok": False, "message": "Enter both Plex URL and X-Plex-Token first."}
+                r = await client.get(f"{url}/identity", params={"X-Plex-Token": tok}, headers={"Accept": "application/json"})
+                if r.status_code == 200:
+                    ver = (r.json().get("MediaContainer") or {}).get("version", "connected")
+                    return {"ok": True, "message": f"Connected to Plex Media Server (v{ver})"}
+                return {"ok": False, "message": f"Plex returned HTTP {r.status_code} — verify Plex Token."}
+
+            if svc == "jellyfin":
+                url = (payload.get("jellyfin_url") or cfg.get("jellyfin_url") or "").strip().rstrip("/")
+                key = (payload.get("jellyfin_api_key") or cfg.get("jellyfin_api_key") or "").strip()
+                if not url or not key:
+                    return {"ok": False, "message": "Enter both Jellyfin URL and API Key first."}
+                r = await client.get(f"{url}/System/Info", headers={"X-Emby-Token": key})
+                if r.status_code == 200:
+                    ver = (r.json() or {}).get("Version", "connected")
+                    return {"ok": True, "message": f"Connected to Jellyfin (v{ver})"}
+                return {"ok": False, "message": f"Jellyfin returned HTTP {r.status_code}."}
+
+            if svc == "emby":
+                url = (payload.get("emby_url") or cfg.get("emby_url") or "").strip().rstrip("/")
+                key = (payload.get("emby_api_key") or cfg.get("emby_api_key") or "").strip()
+                if not url or not key:
+                    return {"ok": False, "message": "Enter both Emby URL and API Key first."}
+                r = await client.get(f"{url}/System/Info", headers={"X-Emby-Token": key})
+                if r.status_code == 200:
+                    ver = (r.json() or {}).get("Version", "connected")
+                    return {"ok": True, "message": f"Connected to Emby (v{ver})"}
+                return {"ok": False, "message": f"Emby returned HTTP {r.status_code}."}
+
+        return {"ok": False, "message": f"Unknown service: {service}"}
+    except Exception as exc:
+        return {"ok": False, "message": f"Connection error: {exc}"}
+

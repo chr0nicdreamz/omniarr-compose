@@ -2232,5 +2232,37 @@ ${fpath}?`)) return;
             setInterval(() => refreshServiceHealth(false), 60000);
         });
     </script>
+
+    <script>
+        async function testConn(service) {
+            const box = document.getElementById('test-' + service);
+            if (box) {
+                box.className = 'text-xs text-amber-300';
+                box.textContent = '⏳ Testing ' + service + ' connection...';
+            }
+            const payload = {};
+            document.querySelectorAll('input[name]').forEach(inp => {
+                if (inp.value && inp.value.trim()) payload[inp.name] = inp.value.trim();
+            });
+            try {
+                const res = await fetch('/api/test-connection/' + encodeURIComponent(service), {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (box) {
+                    box.className = 'text-xs font-medium ' + (data.ok ? 'text-emerald-400' : 'text-rose-400');
+                    box.textContent = (data.ok ? '✓ ' : '✕ ') + (data.message || (data.ok ? 'Connected' : 'Failed'));
+                }
+                if (typeof refreshServiceHealth === 'function') refreshServiceHealth(true);
+            } catch (e) {
+                if (box) {
+                    box.className = 'text-xs text-rose-400';
+                    box.textContent = '✕ Request error: ' + e;
+                }
+            }
+        }
+    </script>
 </body>
 </html>
