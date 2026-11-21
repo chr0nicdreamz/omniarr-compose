@@ -735,13 +735,7 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             if (document.querySelector('.cal-type-btn')) applyCalFilters();
-        }); else if (state === 'movie' || state === 'tv') {
-                    el.style.display = (el.dataset.calKind === state) ? '' : 'none';
-                } else {
-                    el.style.display = (el.dataset.calState === state) ? '' : 'none';
-                }
-            }););
-        }
+        });
         async function syncCalendarNow() {
             try {
                 await fetch('/api/calendar/sync', { method: 'POST' });
