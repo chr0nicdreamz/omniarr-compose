@@ -8,7 +8,7 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
-    <div class="max-w-7xl mx-auto p-4 md:p-8">
+    <div class="w-full px-3 sm:px-6 lg:px-10 py-4 md:py-6">
         <div class="mb-5 flex items-center justify-between">
             <a href="/" class="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-400 hover:text-indigo-300 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg">
                 ← Back to Library
@@ -25,7 +25,7 @@
 
             <div class="relative p-6 md:p-8 flex flex-col md:flex-row gap-6 md:gap-8">
                 <!-- Poster -->
-                <div class="w-48 md:w-64 flex-shrink-0 mx-auto md:mx-0">
+                <div class="w-40 sm:w-44 md:w-52 flex-shrink-0 mx-auto md:mx-0 flex flex-col gap-2">
                     <div class="aspect-[2/3] rounded-xl overflow-hidden bg-slate-800 border border-slate-700 shadow-lg">
                         {% if item.poster_url %}
                         <img src="{{ item.poster_url }}" alt="{{ item.title }}" class="w-full h-full object-cover">
@@ -35,6 +35,9 @@
                         </div>
                         {% endif %}
                     </div>
+                    <button type="button" onclick="openPosterPicker()" class="w-full bg-slate-800/90 hover:bg-indigo-600 border border-slate-700 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-slate-200 transition">
+                        🎨 Change Poster
+                    </button>
                 </div>
 
                 <!-- Metadata & Actions -->
@@ -163,7 +166,7 @@
                 </div>
                 <span class="text-xs text-slate-500 font-mono">{{ meta.cast|length }} billed</span>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
+            <div class="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-9 xl:grid-cols-10 2xl:grid-cols-12 gap-2.5">
                 {% for actor in meta.cast %}
                 <div class="bg-slate-950/80 border border-slate-800/90 rounded-xl overflow-hidden flex flex-col hover:border-indigo-500/50 transition">
                     <div class="aspect-[3/4] bg-slate-800 overflow-hidden flex items-center justify-center">
@@ -198,7 +201,7 @@
             </div>
 
             {% if meta.reviews %}
-            <div class="grid md:grid-cols-2 gap-4">
+            <div class="grid md:grid-cols-2 xl:grid-cols-3 gap-3.5">
                 {% for rev in meta.reviews %}
                 <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-4 flex flex-col justify-between gap-3">
                     <div>
@@ -388,7 +391,7 @@
     </script>
 
     {% if item.media_type == 'tv' %}
-    <div class="max-w-7xl mx-auto mt-6 bg-slate-900 border border-slate-800 rounded-2xl p-6">
+    <div class="w-full px-3 sm:px-6 lg:px-10 mt-6"><div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
         <div class="flex items-center justify-between mb-4">
             <div>
                 <h2 class="text-lg font-bold text-indigo-300">📺 Seasons & Episodes</h2>
@@ -399,6 +402,7 @@
         <div id="tv-seasons-container" class="space-y-4 text-xs">
             <div class="text-slate-400">Scanning disk & fetching episode guide...</div>
         </div>
+    </div>
     </div>
     <script>
         async function loadTvSeasons() {
@@ -452,9 +456,7 @@
     </script>
     {% endif %}
 
-    <div class="max-w-7xl mx-auto mt-4 flex justify-end gap-2">
-        <button type="button" onclick="openPosterPicker()" class="bg-slate-800 hover:bg-indigo-600 border border-slate-700 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-100">🎨 Change / Pick Poster</button>
-    </div>
+
 
     <div id="poster-picker-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
         <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full p-6 shadow-2xl max-h-[88vh] flex flex-col">

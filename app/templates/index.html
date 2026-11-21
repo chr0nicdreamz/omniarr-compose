@@ -322,6 +322,17 @@
             {% endif %}
         </form>
 
+                <!-- Poster Grid Density Toolbar -->
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-2 bg-slate-900/80 border border-slate-800/90 rounded-xl px-3.5 py-2 text-xs">
+            <span class="text-slate-400 font-medium">🖼️ Poster Grid Density:</span>
+            <div class="inline-flex flex-wrap items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+                <button type="button" data-grid-cols="auto" onclick="setOmniGridCols('auto')" class="omni-grid-btn px-2.5 py-1 rounded-md text-[11px] font-semibold bg-indigo-600 text-white">Auto</button>
+                <button type="button" data-grid-cols="6" onclick="setOmniGridCols('6')" class="omni-grid-btn px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-300 hover:bg-slate-800">6 Col</button>
+                <button type="button" data-grid-cols="8" onclick="setOmniGridCols('8')" class="omni-grid-btn px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-300 hover:bg-slate-800">8 Col</button>
+                <button type="button" data-grid-cols="10" onclick="setOmniGridCols('10')" class="omni-grid-btn px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-300 hover:bg-slate-800">10 Col</button>
+                <button type="button" data-grid-cols="12" onclick="setOmniGridCols('12')" class="omni-grid-btn px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-300 hover:bg-slate-800">12 Col</button>
+            </div>
+        </div>
         {% if is_overview %}
         <!-- HOME OVERVIEW: LAST 10 ADDED MOVIES -->
         <section class="mb-10">
@@ -333,7 +344,7 @@
                 </a>
                 <a href="/?tab=library&media_type=movie" class="text-xs font-medium text-indigo-400 hover:text-indigo-300">View All Movies →</a>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+            <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
                 {% for item in recent_movies %}
                     {{ render_card(item) }}
                 {% endfor %}
@@ -350,7 +361,7 @@
                 </a>
                 <a href="/?tab=library&media_type=tv" class="text-xs font-medium text-indigo-400 hover:text-indigo-300">View All TV Shows →</a>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+            <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
                 {% for item in recent_tv %}
                     {{ render_card(item) }}
                 {% endfor %}
@@ -370,7 +381,7 @@
                     <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort=title_asc&page=1" class="px-2.5 py-1 rounded {{ 'bg-indigo-600 text-white' if sort == 'title_asc' else 'bg-slate-800 text-slate-300' }}">A–Z</a>
                 </div>
             </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+            <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
                 {% for item in items %}
                     {{ render_card(item) }}
                 {% endfor %}
@@ -2134,6 +2145,34 @@ ${fpath}?`)) return;
             if (res.ok) btn.closest('div').remove();
             else { alert('Failed to delete orphan file'); btn.disabled = false; }
         }
+    </script>
+
+    <script>
+        function setOmniGridCols(cols) {
+            localStorage.setItem('omni_grid_cols', cols);
+            const map = {
+                'auto': 'omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5',
+                '6':    'omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3.5',
+                '8':    'omni-poster-grid grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3',
+                '10':   'omni-poster-grid grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-10 gap-2.5',
+                '12':   'omni-poster-grid grid grid-cols-3 sm:grid-cols-6 md:grid-cols-9 lg:grid-cols-12 gap-2.5'
+            };
+            const targetCls = map[cols] || map['auto'];
+            document.querySelectorAll('.omni-poster-grid').forEach(g => { g.className = targetCls; });
+            document.querySelectorAll('.omni-grid-btn').forEach(btn => {
+                if (btn.dataset.gridCols === cols) {
+                    btn.classList.add('bg-indigo-600', 'text-white');
+                    btn.classList.remove('text-slate-300', 'hover:bg-slate-800');
+                } else {
+                    btn.classList.remove('bg-indigo-600', 'text-white');
+                    btn.classList.add('text-slate-300', 'hover:bg-slate-800');
+                }
+            });
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedCols = localStorage.getItem('omni_grid_cols') || 'auto';
+            setOmniGridCols(savedCols);
+        });
     </script>
 </body>
 </html>
