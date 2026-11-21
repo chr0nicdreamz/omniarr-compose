@@ -1460,30 +1460,77 @@ async def sync_calendar_schedules(db) -> dict:
                 errors += 1
                 continue
 
-        if tmdb_key:
-            monitored_movies = db.query(MediaItem).filter(
-                MediaItem.media_type == "movie",
-                MediaItem.monitored == True,
-            ).all()
-            for mov in monitored_movies:
-                if mov.release_date and mov.status == "available":
-                    continue
-                clean_mov = re.sub(r"\s*\(\d{4}\)\s*$", "", (mov.title or "")).strip()
-                try:
+        all_movies = db.query(MediaItem).filter(
+            MediaItem.media_type == "movie",
+        ).all()
+        movies_checked = 0
+        for mov in all_movies:
+            # Skip already-imported movies that already have a valid YYYY-MM-DD release date
+            if mov.release_date and len(mov.release_date) >= 10 and mov.status == "available":
+                continue
+            clean_mov = re.sub(r"\s*\(\d{4}\)\s*$", "", (mov.title or "")).strip()
+            if not clean_mov:
+                continue
+            rel = ""
+            try:
+                if tmdb_key:
                     params = {"api_key": tmdb_key, "query": clean_mov}
                     if mov.year:
                         params["year"] = mov.year
                     r = await client.get("https://api.themoviedb.org/3/search/movie", params=params)
-                    if r.status_code == 200:
-                        results = r.json().get("results") or []
-                        if results and results[0].get("release_date"):
-                            rel = results[0]["release_date"].strip()
-                            if mov.release_date != rel:
-                                mov.release_date = rel
-                                updated_movies += 1
-                except Exception:
-                    errors += 1
-                    continue
+                    results = (r.json().get("results") or []) if r.status_code == 200 else []
+                    # Retry without year constraint if strict year match missed (e.g. festival vs theatrical year)
+                    if not results and mov.year:
+                        r2 = await client.get(
+                            "https://api.themoviedb.org/3/search/movie",
+                            params={"api_key": tmdb_key, "query": clean_mov},
+                        )
+                        if r2.status_code == 200:
+                            results = r2.json().get("results") or []
+                    if results:
+                        # Prefer Digital (4) or Physical (5) US release date if available, else theatrical release_date
+                        tmdb_id = results[0].get("id")
+                        rel = (results[0].get("release_date") or "").strip()
+                        if tmdb_id:
+                            rd_resp = await client.get(
+                                f"https://api.themoviedb.org/3/movie/{tmdb_id}/release_dates",
+                                params={"api_key": tmdb_key},
+                            )
+                            if rd_resp.status_code == 200:
+                                for country in (rd_resp.json().get("results") or []):
+                                    if country.get("iso_3166_1") == "US":
+                                        digital_dates = [
+                                            d.get("release_date", "")[:10]
+                                            for d in (country.get("release_dates") or [])
+                                            if d.get("type") in (4, 5) and d.get("release_date")
+                                        ]
+                                        if digital_dates:
+                                            digital_dates.sort()
+                                            rel = digital_dates[0]
+                                        break
+                # Fallback to iTunes Search API if no TMDB key or TMDB had no match
+                if not rel:
+                    it_resp = await client.get(
+                        "https://itunes.apple.com/search",
+                        params={"term": clean_mov, "media": "movie", "entity": "movie", "limit": 5},
+                    )
+                    if it_resp.status_code == 200:
+                        for item_res in (it_resp.json().get("results") or []):
+                            r_date = (item_res.get("releaseDate") or "")[:10]
+                            if r_date and (not mov.year or str(mov.year) in r_date or abs(int(r_date[:4]) - int(mov.year)) <= 1):
+                                rel = r_date
+                                break
+
+                if rel and len(rel) >= 10 and mov.release_date != rel:
+                    mov.release_date = rel[:10]
+                    updated_movies += 1
+                movies_checked += 1
+                if movies_checked % 20 == 0:
+                    db.commit()
+                    await asyncio.sleep(0.25)
+            except Exception:
+                errors += 1
+                continue
 
     db.commit()
     return {

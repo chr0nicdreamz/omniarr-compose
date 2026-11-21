@@ -581,15 +581,18 @@
                     </div>
                 </div>
 
-                <!-- Legend & Quick Filter -->
+                <!-- Media Type & Status Filters -->
                 <div class="flex flex-wrap items-center gap-2 text-[11px]">
-                    <button type="button" onclick="filterCalPills('all', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-indigo-600 text-white font-semibold">All</button>
-                    <button type="button" onclick="filterCalPills('movie', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-purple-950/80 border border-purple-500/50 text-purple-200 hover:bg-purple-900/80">🎬 Movies</button>
-                    <button type="button" onclick="filterCalPills('tv', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-sky-950/80 border border-sky-500/50 text-sky-200 hover:bg-sky-900/80">📺 TV Shows</button>
+                    <div class="inline-flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+                        <button type="button" data-cal-type="all" onclick="setCalMediaType('all')" class="cal-type-btn px-2.5 py-1 rounded-md bg-indigo-600 text-white font-semibold">All Media</button>
+                        <button type="button" data-cal-type="movie" onclick="setCalMediaType('movie')" class="cal-type-btn px-2.5 py-1 rounded-md text-purple-300 hover:bg-slate-800 font-semibold">🎬 Movies</button>
+                        <button type="button" data-cal-type="tv" onclick="setCalMediaType('tv')" class="cal-type-btn px-2.5 py-1 rounded-md text-sky-300 hover:bg-slate-800 font-semibold">📺 TV Shows</button>
+                    </div>
                     <span class="text-slate-700">|</span>
-                    <button type="button" onclick="filterCalPills('missing', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-slate-800 text-amber-300 hover:bg-slate-700">⏳ Missing</button>
-                    <button type="button" onclick="filterCalPills('available', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-slate-800 text-emerald-300 hover:bg-slate-700">✓ Grabbed</button>
-                    <button type="button" onclick="filterCalPills('upcoming', this)" class="cal-filter-btn px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 hover:bg-slate-700">🗓️ Upcoming</button>
+                    <button type="button" data-cal-status="all" onclick="setCalStatusFilter('all')" class="cal-status-btn px-2.5 py-1 rounded-full bg-slate-700 text-white font-semibold">Any Status</button>
+                    <button type="button" data-cal-status="missing" onclick="setCalStatusFilter('missing')" class="cal-status-btn px-2.5 py-1 rounded-full bg-slate-800 text-amber-300 hover:bg-slate-700">⏳ Missing</button>
+                    <button type="button" data-cal-status="available" onclick="setCalStatusFilter('available')" class="cal-status-btn px-2.5 py-1 rounded-full bg-slate-800 text-emerald-300 hover:bg-slate-700">✓ Grabbed</button>
+                    <button type="button" data-cal-status="upcoming" onclick="setCalStatusFilter('upcoming')" class="cal-status-btn px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 hover:bg-slate-700">🗓️ Upcoming</button>
                     <span class="mx-1 text-slate-700">|</span>
                     <button type="button" onclick="syncCalendarNow()"
                             class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white shadow">
@@ -605,7 +608,7 @@
                 <div class="flex flex-wrap items-center gap-2 text-xs">
                     <span class="font-bold text-amber-300">⚡ Aired &amp; Missing ({{ aired_missing|length }}):</span>
                     {% for item in aired_missing %}
-                    <span class="inline-flex items-center gap-1.5 bg-slate-900 border border-amber-700/40 rounded-lg px-2.5 py-1">
+                    <span data-cal-kind="{{ item.kind }}" class="cal-aired-pill inline-flex items-center gap-1.5 bg-slate-900 border border-amber-700/40 rounded-lg px-2.5 py-1">
                         <a href="/media/{{ item.media_id }}" class="font-semibold text-slate-100 hover:text-indigo-300">{{ item.title }}</a>
                         <span class="text-amber-300 font-mono text-[11px]">{{ item.subtitle.split(' • ')[0] }}</span>
                         {% if item.kind == 'tv' %}
@@ -689,15 +692,50 @@
             </div>
         </div>
         <script>
-        function filterCalPills(state, btn) {
-            document.querySelectorAll('.cal-filter-btn').forEach(b => {
-                b.classList.remove('ring-2', 'ring-white', 'bg-indigo-600', 'text-white');
+        let _calActiveType = localStorage.getItem('omni_cal_type') || 'all';
+        let _calActiveStatus = 'all';
+
+        function applyCalFilters() {
+            document.querySelectorAll('.cal-type-btn').forEach(b => {
+                if (b.dataset.calType === _calActiveType) {
+                    b.classList.add('bg-indigo-600', 'text-white');
+                } else {
+                    b.classList.remove('bg-indigo-600', 'text-white');
+                }
             });
-            btn.classList.add('ring-2', 'ring-white');
+            document.querySelectorAll('.cal-status-btn').forEach(b => {
+                if (b.dataset.calStatus === _calActiveStatus) {
+                    b.classList.add('bg-slate-700', 'text-white', 'ring-1', 'ring-indigo-400');
+                    b.classList.remove('bg-slate-800');
+                } else {
+                    b.classList.remove('bg-slate-700', 'text-white', 'ring-1', 'ring-indigo-400');
+                    b.classList.add('bg-slate-800');
+                }
+            });
             document.querySelectorAll('.cal-pill').forEach(el => {
-                if (state === 'all') {
-                    el.style.display = '';
-                } else if (state === 'movie' || state === 'tv') {
+                const matchType = (_calActiveType === 'all' || el.dataset.calKind === _calActiveType);
+                const matchStatus = (_calActiveStatus === 'all' || el.dataset.calState === _calActiveStatus);
+                el.style.display = (matchType && matchStatus) ? '' : 'none';
+            });
+            document.querySelectorAll('.cal-aired-pill').forEach(el => {
+                el.style.display = (_calActiveType === 'all' || el.dataset.calKind === _calActiveType) ? '' : 'none';
+            });
+        }
+
+        function setCalMediaType(kind) {
+            _calActiveType = kind;
+            localStorage.setItem('omni_cal_type', kind);
+            applyCalFilters();
+        }
+
+        function setCalStatusFilter(status) {
+            _calActiveStatus = status;
+            applyCalFilters();
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (document.querySelector('.cal-type-btn')) applyCalFilters();
+        }); else if (state === 'movie' || state === 'tv') {
                     el.style.display = (el.dataset.calKind === state) ? '' : 'none';
                 } else {
                     el.style.display = (el.dataset.calState === state) ? '' : 'none';
