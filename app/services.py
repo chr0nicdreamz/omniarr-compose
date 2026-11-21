@@ -1460,26 +1460,62 @@ async def sync_calendar_schedules(db) -> dict:
                 errors += 1
                 continue
 
-        all_movies = db.query(MediaItem).filter(
-            MediaItem.media_type == "movie",
-        ).all()
+        # Prioritize wanted/downloading movies and recent years (2024+) so current calendar months populate immediately
+        from sqlalchemy import case
+        all_movies = (
+            db.query(MediaItem)
+            .filter(MediaItem.media_type == "movie")
+            .order_by(
+                case((MediaItem.status != "available", 0), else_=1),
+                MediaItem.year.desc().nullslast(),
+                MediaItem.id.desc(),
+            )
+            .limit(400)
+            .all()
+        )
+
+        # Build fast lookup map of Plex movie release dates (originallyAvailableAt) if Plex is configured
+        plex_dates = {}
+        plex_url = (cfg.get("plex_url") or "").strip().rstrip("/")
+        plex_token = (cfg.get("plex_token") or "").strip()
+        if plex_url and plex_token:
+            try:
+                sec_r = await client.get(
+                    f"{plex_url}/library/sections",
+                    headers={"X-Plex-Token": plex_token, "Accept": "application/json"},
+                )
+                if sec_r.status_code == 200:
+                    for sec in (sec_r.json().get("MediaContainer", {}).get("Directory") or []):
+                        if sec.get("type") == "movie":
+                            key = sec.get("key")
+                            lib_r = await client.get(
+                                f"{plex_url}/library/sections/{key}/all",
+                                headers={"X-Plex-Token": plex_token, "Accept": "application/json"},
+                            )
+                            if lib_r.status_code == 200:
+                                for meta in (lib_r.json().get("MediaContainer", {}).get("Metadata") or []):
+                                    p_title = (meta.get("title") or "").strip().lower()
+                                    p_orig = (meta.get("originallyAvailableAt") or "").strip()
+                                    if p_title and len(p_orig) >= 10:
+                                        plex_dates[p_title] = p_orig[:10]
+            except Exception:
+                pass
+
         movies_checked = 0
         for mov in all_movies:
-            # Skip already-imported movies that already have a valid YYYY-MM-DD release date
             if mov.release_date and len(mov.release_date) >= 10 and mov.status == "available":
                 continue
             clean_mov = re.sub(r"\s*\(\d{4}\)\s*$", "", (mov.title or "")).strip()
             if not clean_mov:
                 continue
-            rel = ""
+            rel = plex_dates.get(clean_mov.lower(), "")
             try:
-                if tmdb_key:
+                if not rel and tmdb_key:
                     params = {"api_key": tmdb_key, "query": clean_mov}
                     if mov.year:
                         params["year"] = mov.year
                     r = await client.get("https://api.themoviedb.org/3/search/movie", params=params)
                     results = (r.json().get("results") or []) if r.status_code == 200 else []
-                    # Retry without year constraint if strict year match missed (e.g. festival vs theatrical year)
                     if not results and mov.year:
                         r2 = await client.get(
                             "https://api.themoviedb.org/3/search/movie",
@@ -1488,7 +1524,6 @@ async def sync_calendar_schedules(db) -> dict:
                         if r2.status_code == 200:
                             results = r2.json().get("results") or []
                     if results:
-                        # Prefer Digital (4) or Physical (5) US release date if available, else theatrical release_date
                         tmdb_id = results[0].get("id")
                         rel = (results[0].get("release_date") or "").strip()
                         if tmdb_id:
@@ -1508,7 +1543,7 @@ async def sync_calendar_schedules(db) -> dict:
                                             digital_dates.sort()
                                             rel = digital_dates[0]
                                         break
-                # Fallback to iTunes Search API if no TMDB key or TMDB had no match
+
                 if not rel:
                     it_resp = await client.get(
                         "https://itunes.apple.com/search",
@@ -1521,13 +1556,13 @@ async def sync_calendar_schedules(db) -> dict:
                                 rel = r_date
                                 break
 
-                if rel and len(rel) >= 10 and mov.release_date != rel:
+                if rel and len(rel) >= 10 and mov.release_date != rel[:10]:
                     mov.release_date = rel[:10]
                     updated_movies += 1
                 movies_checked += 1
-                if movies_checked % 20 == 0:
+                if movies_checked % 15 == 0:
                     db.commit()
-                    await asyncio.sleep(0.25)
+                    await asyncio.sleep(0.15)
             except Exception:
                 errors += 1
                 continue
