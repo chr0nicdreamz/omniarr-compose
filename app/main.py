@@ -93,7 +93,7 @@ from .services import (
     _find_local_poster_file,
     _search_plex_poster,
     _fetch_public_poster,
-    get_poster_candidates, fetch_media_metadata, move_media_folder, scan_existing_library, clean_media_title, _find_local_poster_file, build_clean_filename, record_history, send_notification
+    get_poster_candidates, fetch_media_metadata, move_media_folder, fetch_tautulli_activity, fetch_tautulli_watch_stats, run_library_health_audit, scan_franchise_collections, scan_existing_library, clean_media_title, _find_local_poster_file, build_clean_filename, record_history, send_notification
 )
 
 app = FastAPI(title="OmniArr", lifespan=lifespan)
@@ -1480,3 +1480,69 @@ async def seerr_add_series(payload: dict, db: Session = Depends(get_db)):
     db.add(item)
     db.commit()
     return {"id": item.id, "title": item.title, "tvdbId": payload.get("tvdbId")}
+
+
+# === ONE-STOP HUB API ROUTES: TAUTULLI, LIBRARY HEALTH AUDITOR & COLLECTIONS ===
+@app.get("/api/tautulli/overview")
+async def api_tautulli_overview(db: Session = Depends(get_db)):
+    cfg = get_settings(db)
+    items = db.query(MediaItem).all()
+    activity = await fetch_tautulli_activity(cfg)
+    stats = await fetch_tautulli_watch_stats(cfg, items)
+    return {"activity": activity, "stats": stats}
+
+
+@app.get("/api/health/audit")
+def api_health_audit(db: Session = Depends(get_db)):
+    return run_library_health_audit(db)
+
+
+@app.post("/api/health/delete-orphan")
+def api_health_delete_orphan(payload: dict, db: Session = Depends(get_db)):
+    cfg = get_settings(db)
+    dl_mount = Path((cfg.get("qbit_local_mount") or "").strip())
+    target = Path((payload.get("path") or "").strip())
+    if not dl_mount.exists() or not target.exists() or not target.is_file():
+        raise HTTPException(status_code=400, detail="Invalid orphan file path")
+    if dl_mount.resolve() not in target.resolve().parents:
+        raise HTTPException(status_code=403, detail="Path must reside inside configured download mount")
+    target.unlink()
+    record_history(db, "delete", target.name, detail="Deleted orphaned download file via Health Auditor")
+    return {"ok": True}
+
+
+@app.get("/api/collections")
+async def api_get_collections(db: Session = Depends(get_db)):
+    cols = await scan_franchise_collections(db)
+    return {"collections": cols}
+
+
+@app.post("/api/collections/grab-missing")
+async def api_collections_grab_missing(payload: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    cfg = get_settings(db)
+    missing_items = payload.get("missing") or []
+    added = 0
+    for entry in missing_items:
+        title = (entry.get("title") or "").strip()
+        year = entry.get("year")
+        if not title:
+            continue
+        existing = db.query(MediaItem).filter(MediaItem.title.ilike(title), MediaItem.media_type == "movie").first()
+        if not existing:
+            item = MediaItem(
+                title=title,
+                year=int(year) if year else None,
+                media_type="movie",
+                status="wanted",
+                quality_profile=cfg.get("default_movie_profile") or "HD-1080p",
+                poster_url=entry.get("poster_url") or "",
+            )
+            db.add(item)
+            db.commit()
+            db.refresh(item)
+            added += 1
+        else:
+            item = existing
+        if item.status != "available":
+            background_tasks.add_task(auto_search_and_grab_item, item.id)
+    return {"ok": True, "added": added}

@@ -102,6 +102,14 @@
                class="px-3.5 py-2 rounded-lg text-xs font-semibold transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'calendar' else 'text-slate-300 hover:bg-slate-800' }}">
                 📅 Calendar
             </a>
+                <a href="/?tab=collections"
+                   class="px-3.5 py-2 rounded-lg text-xs font-semibold transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'collections' else 'text-slate-300 hover:bg-slate-800' }}">
+                    🎞️ Collections
+                </a>
+                <a href="/?tab=health"
+                   class="px-3.5 py-2 rounded-lg text-xs font-semibold transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'health' else 'text-slate-300 hover:bg-slate-800' }}">
+                    📊 Health &amp; Storage
+                </a>
                 <a href="/?tab=activity"
                    class="px-4 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab in ('activity', 'history') else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
                     📥 Activity &amp; Logs
@@ -229,6 +237,18 @@
         {% endmacro %}
 
         <!-- TAB 1: SPLIT LIBRARY -->
+        <!-- Tautulli Live Active Streams Banner -->
+        <div id="tautulli-live-bar" class="hidden mb-5 bg-gradient-to-r from-amber-950/50 via-slate-900 to-slate-900 border border-amber-500/40 rounded-xl p-3.5 shadow-lg">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <div class="flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+                    <span id="tautulli-stream-summary" class="text-xs font-bold text-amber-300">Tautulli Live Streams</span>
+                </div>
+                <span id="tautulli-bw-badge" class="text-[11px] font-mono text-slate-400"></span>
+            </div>
+            <div id="tautulli-sessions-list" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs"></div>
+        </div>
+
         {% if active_tab == 'library' %}
         <!-- Quick Add & Search Bar -->
         <form action="/add" method="post" class="bg-slate-900 border border-slate-800 p-4 rounded-xl mb-6 flex flex-wrap gap-3 items-end">
@@ -1095,6 +1115,27 @@
                     <label class="flex items-center gap-2"><input type="checkbox" name="emby_notify" value="true" {{ 'checked' if cfg.emby_notify == 'true' }}><span>Refresh Library on Grab / Import</span></label>
                 </div>
             </div>
+            <div class="mt-4 pt-4 border-t border-slate-800">
+                <h4 class="text-xs font-bold uppercase tracking-wider text-amber-300 mb-3">📊 Tautulli &amp; Metadata Enrichment Keys</h4>
+                <div class="grid sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Tautulli URL</label>
+                        <input type="text" name="tautulli_url" placeholder="http://192.168.11.x:8181" value="{{ cfg.tautulli_url }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Tautulli API Key</label>
+                        <input type="password" name="tautulli_api_key" value="{{ cfg.tautulli_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">TMDB API Key (Franchises, Cast &amp; Reviews)</label>
+                        <input type="password" name="tmdb_api_key" value="{{ cfg.tmdb_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">OMDb API Key (IMDb &amp; Rotten Tomatoes Scores)</label>
+                        <input type="password" name="omdb_api_key" value="{{ cfg.omdb_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                </div>
+            </div>
 
             <!-- Seerr & General Security -->
             <div class="border-t border-slate-800 pt-5">
@@ -1540,6 +1581,72 @@
         <button type="button" onclick="executeBulkMove()" class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white">🚚 Move Selected</button>
         <button type="button" onclick="clearBulkSelection()" class="text-xs text-slate-400 hover:text-slate-200 px-2">Clear</button>
     </div>
+        {% if active_tab == 'collections' %}
+        <div class="space-y-6">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-lg font-bold text-indigo-300">🎞️ Custom Collections &amp; Franchise Tracker</h2>
+                    <p class="text-xs text-slate-400">Automatically tracks movie trilogies, sagas, and Plex collections—showing missing sequels ready to grab in one click.</p>
+                </div>
+                <button type="button" onclick="loadFranchiseCollections(true)" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-semibold">
+                    ↻ Scan Franchises &amp; Collections
+                </button>
+            </div>
+            <div id="collections-grid" class="grid md:grid-cols-2 gap-5">
+                <div class="col-span-full text-center py-12 text-xs text-slate-400 bg-slate-900 border border-slate-800 rounded-2xl">
+                    Scanning Plex collections &amp; TMDB franchises...
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if active_tab == 'health' %}
+        <div class="space-y-6">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-lg font-bold text-indigo-300">📊 Library Health, Codec &amp; Storage Auditor</h2>
+                    <p class="text-xs text-slate-400">Inspect H.264 vs. HEVC/AV1 codecs for Tdarr transcoding, catch duplicate files &amp; orphaned downloads, and review Tautulli unwatched media.</p>
+                </div>
+                <button type="button" onclick="loadHealthAndTautulli()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-semibold">
+                    ↻ Run Full Audit
+                </button>
+            </div>
+
+            <!-- Codec & Resolution Breakdown Cards -->
+            <div id="health-summary-cards" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 text-slate-400">Scanning codecs &amp; resolutions...</div>
+            </div>
+
+            <!-- Large H.264 Files Ready for Tdarr Transcoding -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <h3 class="text-sm font-bold text-indigo-300 mb-1">⚡ Large H.264 Files (Prime Tdarr Transcode Candidates)</h3>
+                <p class="text-xs text-slate-400 mb-4">Available files over 2 GB encoded in H.264/AVC that can save 40–60% disk space when converted to HEVC/AV1.</p>
+                <div id="health-h264-table" class="overflow-x-auto text-xs text-slate-400">Scanning...</div>
+            </div>
+
+            <!-- Duplicate Library Files & Orphaned Downloads -->
+            <div class="grid lg:grid-cols-2 gap-6">
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                    <h3 class="text-sm font-bold text-amber-300 mb-1">👯 Duplicate Video Files</h3>
+                    <p class="text-xs text-slate-400 mb-4">Movie folders containing multiple video files.</p>
+                    <div id="health-duplicates-list" class="space-y-2.5 text-xs text-slate-400">Scanning...</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                    <h3 class="text-sm font-bold text-rose-300 mb-1">🧹 Orphaned Downloads</h3>
+                    <p class="text-xs text-slate-400 mb-4">Video files in your download mount not linked to any library item.</p>
+                    <div id="health-orphans-list" class="space-y-2.5 text-xs text-slate-400">Scanning...</div>
+                </div>
+            </div>
+
+            <!-- Tautulli Unwatched / Stale Media Cleanup -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <h3 class="text-sm font-bold text-amber-300 mb-1">📺 Tautulli Watch History &amp; Stale Media (Unwatched 12+ Months)</h3>
+                <p class="text-xs text-slate-400 mb-4">Available movies and TV shows with zero plays or no plays in the past 365 days.</p>
+                <div id="tautulli-stale-list" class="overflow-x-auto text-xs text-slate-400">Checking Tautulli watch history...</div>
+            </div>
+        </div>
+        {% endif %}
+
     <script>
         function updateBulkMoveBar() {
             const cbs = Array.from(document.querySelectorAll('.bulk-item-cb:checked'));
@@ -1618,6 +1725,194 @@
                 return;
             }
             if (typeof pollBackgroundTasks === 'function') pollBackgroundTasks();
+        }
+
+        async function loadTautulliLiveBar() {
+            const bar = document.getElementById('tautulli-live-bar');
+            const list = document.getElementById('tautulli-sessions-list');
+            if (!bar || !list) return;
+            try {
+                const res = await fetch('/api/tautulli/overview');
+                const data = await res.json();
+                const act = data.activity || {};
+                if (!act.configured || !act.sessions || !act.sessions.length) {
+                    bar.classList.add('hidden');
+                    return;
+                }
+                bar.classList.remove('hidden');
+                document.getElementById('tautulli-stream-summary').textContent =
+                    `Tautulli Live: ${act.stream_count} Active Stream${act.stream_count === 1 ? '' : 's'}`;
+                document.getElementById('tautulli-bw-badge').textContent =
+                    act.total_bandwidth ? `${Math.round(act.total_bandwidth / 1000)} Mbps total` : '';
+                list.innerHTML = act.sessions.map(s => {
+                    const isTranscode = String(s.transcode_decision || '').toLowerCase().includes('transcode');
+                    const badge = isTranscode
+                        ? `<span class="px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-700/50 text-[10px] font-bold">TRANSCODE</span>`
+                        : `<span class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700/50 text-[10px] font-bold">DIRECT PLAY</span>`;
+                    return `<div class="bg-slate-950/90 border border-slate-800 rounded-lg p-2.5 flex flex-col gap-1">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="font-semibold text-slate-100 truncate">${s.title}</span>
+                            ${badge}
+                        </div>
+                        <div class="flex items-center justify-between text-[11px] text-slate-400">
+                            <span>👤 ${s.user} · ${s.player}</span>
+                            <span class="font-mono text-indigo-300">${s.progress_percent}%</span>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (e) {}
+        }
+        loadTautulliLiveBar();
+
+        async function loadFranchiseCollections() {
+            const grid = document.getElementById('collections-grid');
+            if (!grid) return;
+            grid.innerHTML = '<div class="col-span-full text-center py-12 text-xs text-slate-400 bg-slate-900 border border-slate-800 rounded-2xl">Scanning Plex collections &amp; TMDB franchises...</div>';
+            try {
+                const res = await fetch('/api/collections');
+                const data = await res.json();
+                const cols = data.collections || [];
+                window._omniCollections = cols;
+                if (!cols.length) {
+                    grid.innerHTML = '<div class="col-span-full text-center py-12 text-xs text-slate-400 bg-slate-900 border border-slate-800 rounded-2xl">No collections found yet. Connect Plex or add a free TMDB API key under Settings → Connect &amp; Backup to auto-discover movie franchises.</div>';
+                    return;
+                }
+                grid.innerHTML = cols.map((c, idx) => {
+                    const pct = c.total_count ? Math.round((c.owned_count / c.total_count) * 100) : 100;
+                    const missing = (c.parts || []).filter(p => !p.owned && p.status === 'missing');
+                    const grabBtn = missing.length
+                        ? `<button type="button" onclick="grabMissingCollection(this, ${idx})" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-[11px] font-semibold">🔍 Grab ${missing.length} Missing</button>`
+                        : `<span class="px-2.5 py-1 rounded-lg bg-emerald-950/70 text-emerald-300 border border-emerald-700/50 text-[11px] font-semibold">✓ Complete</span>`;
+                    const partsHtml = (c.parts || []).map(p => {
+                        const pill = p.owned
+                            ? `<span class="text-emerald-400 font-bold">✓</span>`
+                            : (p.status === 'wanted' || p.status === 'downloading'
+                                ? `<span class="text-amber-400 font-bold">⏳</span>`
+                                : `<span class="text-rose-400 font-bold">✕</span>`);
+                        const link = p.tracked_id ? `<a href="/media/${p.tracked_id}" class="hover:underline text-slate-200">${p.title}</a>` : `<span class="text-slate-400">${p.title}</span>`;
+                        return `<div class="flex items-center justify-between py-1 border-t border-slate-800/70 text-xs">
+                            <div class="flex items-center gap-2 truncate">${pill} ${link} ${p.year ? `<span class="text-slate-500">(${p.year})</span>` : ''}</div>
+                            <span class="text-[10px] uppercase text-slate-500">${p.status}</span>
+                        </div>`;
+                    }).join('');
+                    return `<div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between gap-4">
+                        <div>
+                            <div class="flex items-start justify-between gap-3 mb-2">
+                                <div>
+                                    <span class="text-[10px] uppercase tracking-wider text-indigo-400 font-bold">${c.source}</span>
+                                    <h3 class="text-base font-bold text-white">${c.name}</h3>
+                                </div>
+                                ${grabBtn}
+                            </div>
+                            <div class="flex items-center gap-2 text-xs text-slate-400 mb-3">
+                                <div class="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
+                                    <div class="bg-indigo-500 h-full" style="width:${pct}%"></div>
+                                </div>
+                                <span class="font-mono text-slate-300">${c.owned_count}/${c.total_count} (${pct}%)</span>
+                            </div>
+                            <div class="max-h-56 overflow-y-auto pr-1">${partsHtml}</div>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                grid.innerHTML = '<div class="col-span-full text-center py-8 text-xs text-rose-400">Failed to scan collections.</div>';
+            }
+        }
+        if (document.getElementById('collections-grid')) loadFranchiseCollections();
+
+        async function grabMissingCollection(btn, idx) {
+            const col = (window._omniCollections || [])[idx];
+            if (!col) return;
+            const missing = (col.parts || []).filter(p => !p.owned && p.status === 'missing');
+            if (!missing.length) return;
+            btn.disabled = true;
+            btn.textContent = 'Queueing...';
+            const res = await fetch('/api/collections/grab-missing', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({missing})
+            });
+            if (res.ok) {
+                btn.className = 'bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[11px] font-semibold';
+                btn.textContent = '✓ Searching Missing';
+                setTimeout(loadFranchiseCollections, 1200);
+            }
+        }
+
+        async function loadHealthAndTautulli() {
+            const cards = document.getElementById('health-summary-cards');
+            if (!cards) return;
+            try {
+                const [hRes, tRes] = await Promise.all([
+                    fetch('/api/health/audit'),
+                    fetch('/api/tautulli/overview')
+                ]);
+                const h = await hRes.json();
+                const t = await tRes.json();
+                const codecsStr = Object.entries(h.codecs || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'None';
+                const resStr = Object.entries(h.resolutions || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'None';
+                cards.innerHTML = `
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                        <div class="text-slate-400 mb-1">Video Codecs</div>
+                        <div class="font-bold text-indigo-300 text-sm">${codecsStr}</div>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                        <div class="text-slate-400 mb-1">Resolutions</div>
+                        <div class="font-bold text-emerald-300 text-sm">${resStr}</div>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                        <div class="text-slate-400 mb-1">Tdarr H.264 Candidates</div>
+                        <div class="font-bold text-amber-300 text-lg">${(h.h264_candidates || []).length}</div>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                        <div class="text-slate-400 mb-1">Duplicates &amp; Orphans</div>
+                        <div class="font-bold text-rose-300 text-lg">${(h.duplicates || []).length} dup / ${(h.orphaned_downloads || []).length} orphan</div>
+                    </div>
+                `;
+
+                const h264Box = document.getElementById('health-h264-table');
+                const hList = h.h264_candidates || [];
+                h264Box.innerHTML = hList.length
+                    ? `<table class="w-full text-left"><thead><tr class="border-b border-slate-800 text-slate-400"><th class="py-2">Title</th><th class="py-2">Res</th><th class="py-2">Audio</th><th class="py-2">Size</th></tr></thead><tbody>${hList.map(x => `<tr class="border-t border-slate-800/70"><td class="py-2"><a href="/media/${x.id}" class="text-indigo-300 hover:underline font-medium">${x.title}</a></td><td class="py-2">${x.resolution}</td><td class="py-2">${x.audio}</td><td class="py-2 font-mono text-amber-300">${x.size_gb} GB</td></tr>`).join('')}</tbody></table>`
+                    : '<div class="text-slate-500">No large H.264 files found—your library is already well compressed!</div>';
+
+                const dupBox = document.getElementById('health-duplicates-list');
+                const dups = h.duplicates || [];
+                dupBox.innerHTML = dups.length
+                    ? dups.map(d => `<div class="bg-slate-950 border border-slate-800 rounded-lg p-3"><a href="/media/${d.id}" class="font-bold text-amber-300 hover:underline">${d.title}</a><div class="mt-1 font-mono text-[11px] text-slate-400">${d.files.join('<br>')}</div></div>`).join('')
+                    : '<div class="text-slate-500">No duplicate movie files detected.</div>';
+
+                const orphBox = document.getElementById('health-orphans-list');
+                const orphs = h.orphaned_downloads || [];
+                orphBox.innerHTML = orphs.length
+                    ? orphs.map(o => `<div class="bg-slate-950 border border-slate-800 rounded-lg p-3 flex items-center justify-between gap-2"><div class="truncate"><div class="font-mono text-slate-200 truncate" title="${o.path}">${o.name}</div><div class="text-[11px] text-slate-500">${o.size_gb} GB</div></div><button type="button" onclick="deleteOrphanFile(this, '${o.path.replace(/'/g, "\'")}')" class="shrink-0 bg-rose-600/20 hover:bg-rose-600/40 border border-rose-500/40 text-rose-300 px-2.5 py-1 rounded text-[11px]">Delete</button></div>`).join('')
+                    : '<div class="text-slate-500">No orphaned video downloads found.</div>';
+
+                const staleBox = document.getElementById('tautulli-stale-list');
+                const stats = t.stats || {};
+                if (!stats.configured) {
+                    staleBox.innerHTML = '<div class="text-slate-500">Configure Tautulli URL and API Key under <a href="/?tab=settings&section=connect" class="text-indigo-400 underline">Settings → Connect &amp; Backup</a> to surface watch counts and stale media.</div>';
+                } else {
+                    const stales = stats.stale_items || [];
+                    staleBox.innerHTML = stales.length
+                        ? `<table class="w-full text-left"><thead><tr class="border-b border-slate-800 text-slate-400"><th class="py-2">Title</th><th class="py-2">Type</th><th class="py-2">Plays</th><th class="py-2">Last Watched</th></tr></thead><tbody>${stales.map(s => `<tr class="border-t border-slate-800/70"><td class="py-2"><a href="/media/${s.id}" class="text-slate-200 hover:underline font-medium">${s.title}</a></td><td class="py-2 uppercase text-slate-400">${s.media_type}</td><td class="py-2 font-mono">${s.plays}</td><td class="py-2 text-amber-300">${s.last_watched}</td></tr>`).join('')}</tbody></table>`
+                        : '<div class="text-slate-500">Every available item in your library has been watched within the last 12 months!</div>';
+                }
+            } catch (e) {}
+        }
+        if (document.getElementById('health-summary-cards')) loadHealthAndTautulli();
+
+        async function deleteOrphanFile(btn, fpath) {
+            if (!confirm(`Permanently delete orphaned download:
+${fpath}?`)) return;
+            btn.disabled = true;
+            const res = await fetch('/api/health/delete-orphan', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({path: fpath})
+            });
+            if (res.ok) btn.closest('div').remove();
+            else { alert('Failed to delete orphan file'); btn.disabled = false; }
         }
     </script>
 </body>

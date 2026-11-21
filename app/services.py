@@ -47,6 +47,10 @@ DEFAULT_SETTINGS = {
     "emby_url": os.getenv("EMBY_URL", ""),
     "emby_api_key": os.getenv("EMBY_API_KEY", ""),
     "emby_notify": "true",
+    "tautulli_url": os.getenv("TAUTULLI_URL", ""),
+    "tautulli_api_key": os.getenv("TAUTULLI_API_KEY", ""),
+    "tmdb_api_key": os.getenv("TMDB_API_KEY", ""),
+    "omdb_api_key": os.getenv("OMDB_API_KEY", ""),
     "qbit_url": os.getenv("QBIT_URL", "http://localhost:8080"),
     "qbit_user": os.getenv("QBIT_USER", "admin"),
     "qbit_pass": os.getenv("QBIT_PASS", ""),
@@ -1537,3 +1541,330 @@ async def hunt_aired_calendar_items(db) -> int:
 
     db.commit()
     return grabbed
+
+
+# === ONE-STOP HUB: TAUTULLI, LIBRARY HEALTH/CODEC AUDITOR & COLLECTIONS ===
+import subprocess as _subprocess
+import json as _json
+
+async def fetch_tautulli_activity(cfg: dict) -> dict:
+    url = (cfg.get("tautulli_url") or "").rstrip("/")
+    key = (cfg.get("tautulli_api_key") or "").strip()
+    if not url or not key:
+        return {"configured": False, "stream_count": 0, "total_bandwidth": 0, "sessions": []}
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=8.0) as client:
+            r = await client.get(f"{url}/api/v2", params={"apikey": key, "cmd": "get_activity"})
+            if r.status_code != 200:
+                return {"configured": True, "error": f"HTTP {r.status_code}", "stream_count": 0, "sessions": []}
+            data = (r.json().get("response") or {}).get("data") or {}
+            sessions = []
+            for s in (data.get("sessions") or []):
+                sessions.append({
+                    "user": s.get("friendly_name") or s.get("user") or "User",
+                    "title": s.get("full_title") or s.get("title") or "Unknown",
+                    "media_type": s.get("media_type") or "",
+                    "state": s.get("state") or "playing",
+                    "progress_percent": s.get("progress_percent") or 0,
+                    "transcode_decision": s.get("transcode_decision") or "direct play",
+                    "video_resolution": s.get("stream_video_full_resolution") or s.get("video_full_resolution") or "",
+                    "bandwidth": s.get("bandwidth") or 0,
+                    "player": s.get("player") or "",
+                })
+            return {
+                "configured": True,
+                "stream_count": int(data.get("stream_count") or len(sessions)),
+                "total_bandwidth": data.get("total_bandwidth") or 0,
+                "sessions": sessions,
+            }
+    except Exception as e:
+        return {"configured": True, "error": str(e), "stream_count": 0, "sessions": []}
+
+
+async def fetch_tautulli_watch_stats(cfg: dict, items: list) -> dict:
+    url = (cfg.get("tautulli_url") or "").rstrip("/")
+    key = (cfg.get("tautulli_api_key") or "").strip()
+    if not url or not key:
+        return {"configured": False, "stale_items": [], "recent_watches": []}
+    try:
+        async with httpx.AsyncClient(verify=False, timeout=12.0) as client:
+            r = await client.get(f"{url}/api/v2", params={"apikey": key, "cmd": "get_history", "length": 1500})
+            if r.status_code != 200:
+                return {"configured": True, "error": f"HTTP {r.status_code}", "stale_items": [], "recent_watches": []}
+            rows = ((r.json().get("response") or {}).get("data") or {}).get("data") or []
+            last_played = {}
+            play_counts = {}
+            recent_watches = []
+            for row in rows:
+                t_raw = (row.get("grandparent_title") or row.get("title") or "").strip()
+                t_norm = re.sub(r"\s*\(\d{4}\)\s*$", "", t_raw).lower()
+                ts = int(row.get("stopped") or row.get("started") or 0)
+                if t_norm:
+                    play_counts[t_norm] = play_counts.get(t_norm, 0) + 1
+                    if ts > last_played.get(t_norm, 0):
+                        last_played[t_norm] = ts
+                if len(recent_watches) < 15:
+                    recent_watches.append({
+                        "title": row.get("full_title") or t_raw,
+                        "user": row.get("friendly_name") or row.get("user") or "User",
+                        "date": datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "",
+                        "percent_complete": row.get("percent_complete") or 0,
+                    })
+
+            cutoff_ts = int((datetime.utcnow() - timedelta(days=365)).timestamp())
+            stale_items = []
+            for it in items:
+                if it.status != "available":
+                    continue
+                norm = re.sub(r"\s*\(\d{4}\)\s*$", "", (it.title or "")).strip().lower()
+                lp = last_played.get(norm, 0)
+                if lp == 0 or lp < cutoff_ts:
+                    stale_items.append({
+                        "id": it.id,
+                        "title": it.title,
+                        "year": it.year,
+                        "media_type": it.media_type,
+                        "plays": play_counts.get(norm, 0),
+                        "last_watched": datetime.fromtimestamp(lp).strftime("%Y-%m-%d") if lp else "Never watched",
+                        "file_path": it.file_path or "",
+                    })
+            return {"configured": True, "stale_items": stale_items[:100], "recent_watches": recent_watches}
+    except Exception as e:
+        return {"configured": True, "error": str(e), "stale_items": [], "recent_watches": []}
+
+
+def _probe_video_file(fpath: Path) -> dict:
+    info = {"codec": "unknown", "resolution": "unknown", "audio": "unknown", "size_gb": 0.0}
+    try:
+        info["size_gb"] = round(fpath.stat().st_size / (1024**3), 2)
+    except Exception:
+        pass
+    try:
+        cmd = [
+            "ffprobe", "-v", "quiet", "-print_format", "json",
+            "-show_streams", str(fpath)
+        ]
+        out = _subprocess.check_output(cmd, timeout=8, stderr=_subprocess.DEVNULL)
+        streams = _json.loads(out).get("streams") or []
+        for st in streams:
+            ctype = st.get("codec_type")
+            if ctype == "video" and info["codec"] == "unknown":
+                info["codec"] = (st.get("codec_name") or "unknown").upper()
+                h = int(st.get("height") or 0)
+                w = int(st.get("width") or 0)
+                if h >= 2000 or w >= 3800:
+                    info["resolution"] = "4K"
+                elif h >= 1000 or w >= 1900:
+                    info["resolution"] = "1080p"
+                elif h >= 700 or w >= 1200:
+                    info["resolution"] = "720p"
+                elif h > 0:
+                    info["resolution"] = "SD"
+            elif ctype == "audio" and info["audio"] == "unknown":
+                info["audio"] = (st.get("codec_name") or "unknown").upper()
+    except Exception:
+        # Filename heuristic fallback if ffprobe is not installed
+        name_u = fpath.name.upper()
+        for c in ("AV1", "HEVC", "H265", "X265", "H264", "X264"):
+            if c in name_u:
+                info["codec"] = "HEVC" if c in ("HEVC", "H265", "X265") else ("H264" if c in ("H264", "X264") else c)
+                break
+        for r in ("2160P", "4K", "1080P", "720P", "480P"):
+            if r in name_u:
+                info["resolution"] = "4K" if r in ("2160P", "4K") else r.lower()
+                break
+    return info
+
+
+def run_library_health_audit(db: Session) -> dict:
+    cfg = get_settings(db)
+    items = db.query(MediaItem).filter_by(status="available").all()
+    video_exts = {".mkv", ".mp4", ".avi", ".m4v", ".ts", ".mov"}
+    codec_counts = {}
+    res_counts = {}
+    h264_candidates = []
+    duplicates = []
+    tracked_paths = set()
+
+    for it in items:
+        if not it.file_path:
+            continue
+        p = Path(it.file_path)
+        if not p.exists():
+            continue
+        vfiles = [p] if p.is_file() else [f for f in p.rglob("*") if f.is_file() and f.suffix.lower() in video_exts and "sample" not in f.name.lower()]
+        for vf in vfiles:
+            tracked_paths.add(str(vf.resolve()))
+        if it.media_type == "movie" and len(vfiles) > 1:
+            duplicates.append({
+                "id": it.id,
+                "title": it.title,
+                "folder": str(p),
+                "files": [f"{f.name} ({round(f.stat().st_size / (1024**3), 2)} GB)" for f in vfiles],
+            })
+        # Probe first/largest file per item for fast summary
+        if vfiles:
+            primary = max(vfiles, key=lambda f: f.stat().st_size)
+            meta = _probe_video_file(primary)
+            codec_counts[meta["codec"]] = codec_counts.get(meta["codec"], 0) + 1
+            res_counts[meta["resolution"]] = res_counts.get(meta["resolution"], 0) + 1
+            if meta["codec"] in ("H264", "AVC") and meta["size_gb"] >= 2.0:
+                h264_candidates.append({
+                    "id": it.id,
+                    "title": it.title,
+                    "media_type": it.media_type,
+                    "codec": meta["codec"],
+                    "resolution": meta["resolution"],
+                    "audio": meta["audio"],
+                    "size_gb": meta["size_gb"],
+                    "file_name": primary.name,
+                })
+
+    # Scan download mount for orphaned unlinked video files
+    orphaned_downloads = []
+    dl_mount = Path((cfg.get("qbit_local_mount") or "").strip())
+    if dl_mount.exists() and dl_mount.is_dir():
+        for f in dl_mount.rglob("*"):
+            if f.is_file() and f.suffix.lower() in video_exts and "sample" not in f.name.lower():
+                try:
+                    sz_gb = round(f.stat().st_size / (1024**3), 2)
+                    if sz_gb >= 0.25 and str(f.resolve()) not in tracked_paths:
+                        orphaned_downloads.append({
+                            "name": f.name,
+                            "path": str(f),
+                            "size_gb": sz_gb,
+                        })
+                except Exception:
+                    pass
+
+    h264_candidates.sort(key=lambda x: x["size_gb"], reverse=True)
+    orphaned_downloads.sort(key=lambda x: x["size_gb"], reverse=True)
+    return {
+        "scanned_items": len(items),
+        "codecs": codec_counts,
+        "resolutions": res_counts,
+        "h264_candidates": h264_candidates[:60],
+        "duplicates": duplicates[:40],
+        "orphaned_downloads": orphaned_downloads[:50],
+    }
+
+
+async def scan_franchise_collections(db: Session) -> list:
+    cfg = get_settings(db)
+    tmdb_key = (cfg.get("tmdb_api_key") or "").strip()
+    plex_url = (cfg.get("plex_url") or "").split("/web")[0].rstrip("/")
+    plex_token = (cfg.get("plex_token") or "").strip()
+    movies = db.query(MediaItem).filter_by(media_type="movie").all()
+    owned_by_title = {re.sub(r"\s*\(\d{4}\)\s*$", "", m.title).strip().lower(): m for m in movies}
+    collections_map = {}
+
+    async with httpx.AsyncClient(verify=False, timeout=12.0) as client:
+        # 1. TMDB Franchise Collections (discovers missing sequels automatically)
+        if tmdb_key:
+            seen_col_ids = set()
+            for m in movies[:80]:
+                clean_t = re.sub(r"\s*\(\d{4}\)\s*$", "", m.title).strip()
+                try:
+                    params = {"api_key": tmdb_key, "query": clean_t}
+                    if m.year:
+                        params["year"] = m.year
+                    rs = await client.get("https://api.themoviedb.org/3/search/movie", params=params)
+                    hits = (rs.json().get("results") or []) if rs.status_code == 200 else []
+                    if not hits:
+                        continue
+                    mid = hits[0]["id"]
+                    rd = await client.get(f"https://api.themoviedb.org/3/movie/{mid}", params={"api_key": tmdb_key})
+                    col_info = (rd.json().get("belongs_to_collection") or {}) if rd.status_code == 200 else {}
+                    cid = col_info.get("id")
+                    if not cid or cid in seen_col_ids:
+                        continue
+                    seen_col_ids.add(cid)
+                    rc = await client.get(f"https://api.themoviedb.org/3/collection/{cid}", params={"api_key": tmdb_key})
+                    if rc.status_code != 200:
+                        continue
+                    cdata = rc.json()
+                    parts = sorted(cdata.get("parts") or [], key=lambda x: x.get("release_date") or "9999")
+                    if len(parts) < 2:
+                        continue
+                    part_rows = []
+                    owned_cnt = 0
+                    for p in parts:
+                        ptitle = p.get("title") or ""
+                        pdate = p.get("release_date") or ""
+                        pyear = int(pdate[:4]) if len(pdate) >= 4 and pdate[:4].isdigit() else None
+                        matched = owned_by_title.get(ptitle.lower())
+                        is_owned = bool(matched and matched.status == "available")
+                        if is_owned:
+                            owned_cnt += 1
+                        part_rows.append({
+                            "title": ptitle,
+                            "year": pyear,
+                            "release_date": pdate,
+                            "poster_url": f"https://image.tmdb.org/t/p/w185{p['poster_path']}" if p.get("poster_path") else "",
+                            "owned": is_owned,
+                            "tracked_id": matched.id if matched else None,
+                            "status": matched.status if matched else "missing",
+                        })
+                    collections_map[f"tmdb_{cid}"] = {
+                        "id": f"tmdb_{cid}",
+                        "name": cdata.get("name") or col_info.get("name") or "Collection",
+                        "source": "TMDB Franchise",
+                        "poster_url": f"https://image.tmdb.org/t/p/w342{cdata['poster_path']}" if cdata.get("poster_path") else "",
+                        "owned_count": owned_cnt,
+                        "total_count": len(part_rows),
+                        "parts": part_rows,
+                    }
+                except Exception:
+                    continue
+
+        # 2. Plex Collections fallback / supplement
+        if plex_url and plex_token:
+            try:
+                r_sec = await client.get(f"{plex_url}/library/sections", params={"X-Plex-Token": plex_token}, headers={"Accept": "application/json"})
+                if r_sec.status_code == 200:
+                    for sec in (r_sec.json().get("MediaContainer", {}).get("Directory") or []):
+                        if sec.get("type") != "movie":
+                            continue
+                        sk = sec.get("key")
+                        r_cols = await client.get(f"{plex_url}/library/sections/{sk}/collections", params={"X-Plex-Token": plex_token}, headers={"Accept": "application/json"})
+                        if r_cols.status_code != 200:
+                            continue
+                        for col in (r_cols.json().get("MediaContainer", {}).get("Metadata") or []):
+                            cname = col.get("title") or ""
+                            ckey = col.get("ratingKey")
+                            if not cname or not ckey:
+                                continue
+                            if any(v["name"].lower() == cname.lower() for v in collections_map.values()):
+                                continue
+                            r_items = await client.get(f"{plex_url}/library/collections/{ckey}/children", params={"X-Plex-Token": plex_token}, headers={"Accept": "application/json"})
+                            children = (r_items.json().get("MediaContainer", {}).get("Metadata") or []) if r_items.status_code == 200 else []
+                            if not children:
+                                continue
+                            part_rows = []
+                            for ch in children:
+                                ct = ch.get("title") or ""
+                                matched = owned_by_title.get(ct.lower())
+                                part_rows.append({
+                                    "title": ct,
+                                    "year": ch.get("year"),
+                                    "release_date": ch.get("originallyAvailableAt") or "",
+                                    "poster_url": f"{plex_url}{ch['thumb']}?X-Plex-Token={plex_token}" if ch.get("thumb") else "",
+                                    "owned": True,
+                                    "tracked_id": matched.id if matched else None,
+                                    "status": "available",
+                                })
+                            collections_map[f"plex_{ckey}"] = {
+                                "id": f"plex_{ckey}",
+                                "name": cname,
+                                "source": "Plex Collection",
+                                "poster_url": f"{plex_url}{col['thumb']}?X-Plex-Token={plex_token}" if col.get("thumb") else "",
+                                "owned_count": len(part_rows),
+                                "total_count": len(part_rows),
+                                "parts": part_rows,
+                            }
+            except Exception:
+                pass
+
+    res_list = list(collections_map.values())
+    res_list.sort(key=lambda c: (c["total_count"] - c["owned_count"], c["name"]), reverse=True)
+    return res_list
