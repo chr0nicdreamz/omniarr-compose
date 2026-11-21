@@ -4,8 +4,6 @@ import tempfile
 import sqlite3
 import secrets
 from pathlib import Path
-import shutil
-import os
 import json
 import httpx
 from contextlib import asynccontextmanager
@@ -84,7 +82,8 @@ async def lifespan(app: FastAPI):
     except BlockingIOError:
         pass
     yield
-    scheduler.shutdown()
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
 
 from .services import (
     get_settings, save_settings, get_drive_stats, get_media_roots,
@@ -1489,6 +1488,18 @@ async def seerr_add_series(payload: dict, db: Session = Depends(get_db)):
     db.commit()
     return {"id": item.id, "title": item.title, "tvdbId": payload.get("tvdbId")}
 
+@app.post("/api/v3/command", dependencies=[Depends(verify_api_key)])
+async def seerr_command(payload: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    cmd_name = payload.get("name") or payload.get("commandName") or "Unknown"
+    return {
+        "id": 1,
+        "name": cmd_name,
+        "commandName": cmd_name,
+        "status": "queued",
+        "message": None,
+        "body": payload,
+    }
+
 
 # === ONE-STOP HUB API ROUTES: TAUTULLI, LIBRARY HEALTH AUDITOR & COLLECTIONS ===
 @app.get("/api/tautulli/overview")
@@ -1757,4 +1768,3 @@ async def api_health_queue_tdarr(request: Request, db: Session = Depends(get_db)
             return {"ok": False, "message": f"Tdarr returned HTTP {resp.status_code}"}
     except Exception as exc:
         return {"ok": False, "message": f"Tdarr connection error: {exc}"}
-
