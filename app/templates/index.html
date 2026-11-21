@@ -17,7 +17,11 @@
                 <h1 class="text-2xl md:text-3xl font-bold text-indigo-400 tracking-tight">OmniArr</h1>
                 <p class="text-xs text-slate-400">Unified Sonarr • Radarr • Lidarr • Prowlarr Engine</p>
             </div>
-            <div class="flex flex-wrap items-center gap-2">
+            <div id="bg-task-pill" class="hidden items-center gap-2 bg-indigo-950/90 border border-indigo-500/50 text-indigo-200 px-3 py-1 rounded-full text-xs font-medium shadow-lg">
+                    <span id="bg-task-dot" class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+                    <span id="bg-task-text">Background task running...</span>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
                 <div id="health-pills" class="flex items-center gap-1.5 mr-1 text-[11px] bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg">
                     <span class="inline-flex items-center gap-1 text-slate-400"><span id="dot-prowlarr" class="w-2 h-2 rounded-full bg-slate-600"></span>Prowlarr</span>
                     <span class="text-slate-700">•</span>
@@ -30,6 +34,9 @@
                         🖼 Sync Plex Posters
                     </button>
                 </form>
+                <button type="button" onclick="triggerRematchAllPosters()" title="Clear all cached posters and re-match the entire library" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium text-amber-300">
+                    🔄 Rematch All
+                </button>
                 <form action="/scan-now" method="post">
                     <button type="submit" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium text-indigo-300">
                         ↻ Run Search & Import Now
@@ -50,13 +57,13 @@
             <div>
                 <div class="font-semibold text-indigo-300 text-sm mb-1">Welcome to OmniArr — Quick Setup Checklist</div>
                 <div class="flex flex-wrap gap-3 text-slate-300">
-                    <a href="/?tab=media" class="underline hover:text-white">1. Set Media Root Folders</a>
+                    <a href="/?tab=settings&section=media" class="underline hover:text-white">1. Set Media Root Folders</a>
                     <span>→</span>
-                    <a href="/?tab=connect" class="underline hover:text-white">2. Add Prowlarr &amp; qBittorrent</a>
+                    <a href="/?tab=settings&section=connect" class="underline hover:text-white">2. Add Prowlarr &amp; qBittorrent</a>
                     <span>→</span>
-                    <a href="/?tab=connect" class="underline hover:text-white">3. Connect Plex/Jellyfin/Emby</a>
+                    <a href="/?tab=settings&section=connect" class="underline hover:text-white">3. Connect Plex/Jellyfin/Emby</a>
                     <span>→</span>
-                    <a href="/?tab=connect" class="underline hover:text-white">4. Copy API Key to Seerr</a>
+                    <a href="/?tab=settings&section=connect" class="underline hover:text-white">4. Copy API Key to Seerr</a>
                 </div>
             </div>
             <button type="button" onclick="document.getElementById('onboarding-banner').remove()" class="text-slate-400 hover:text-white underline">Dismiss</button>
@@ -68,22 +75,26 @@
         {% set music_items = items | selectattr('media_type', 'equalto', 'music') | list %}
 
         <!-- Navigation Tabs -->
-        <nav class="flex flex-wrap gap-1.5 mb-6 bg-slate-900 p-1.5 rounded-lg border border-slate-800 text-xs font-medium">
-            {% set tabs = [
-                ('library', 'Library (Movies: ' ~ movie_items|length ~ ' • TV: ' ~ tv_items|length ~ ')'),
-                ('activity', 'Activity & Manual Import'),
-                ('media', 'Media Management'),
-                ('profiles', 'Profiles & Custom Formats'),
-                ('indexers', 'Indexers (' ~ indexers|length ~ ')'),
-                ('clients', 'Download Clients'),
-                ('connect', 'Connect & General')
-            ] %}
-            {% for key, label in tabs %}
-            <a href="/?tab={{ key }}&sort={{ sort }}"
-               class="px-3.5 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab == key else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
-                {{ label }}
-            </a>
-            {% endfor %}
+        <nav class="flex flex-wrap items-center justify-between gap-2 mb-6 bg-slate-900 p-1.5 rounded-lg border border-slate-800 text-xs font-medium">
+            <div class="flex flex-wrap gap-1.5">
+                <a href="/?tab=library"
+                   class="px-4 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'library' else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
+                    🏠 Home
+                </a>
+                <a href="/?tab=activity"
+                   class="px-4 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab in ('activity', 'history') else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
+                    📥 Activity &amp; Logs
+                </a>
+                <a href="/?tab=settings&section=media"
+                   class="px-4 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'settings' else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
+                    ⚙️ Settings
+                </a>
+            </div>
+            <div class="flex items-center gap-2 pr-2 text-[11px] text-slate-400">
+                <a href="/?tab=library&media_type=movie" class="hover:text-indigo-300 transition">🎬 {{ total_movies }} Movies</a>
+                <span>•</span>
+                <a href="/?tab=library&media_type=tv" class="hover:text-indigo-300 transition">📺 {{ total_tv }} TV Shows</a>
+            </div>
         </nav>
 
         <!-- MEDIA ITEM MACRO (Supports both Tile Grid & List View) -->
@@ -198,211 +209,196 @@
 
         <!-- TAB 1: SPLIT LIBRARY -->
         {% if active_tab == 'library' %}
-        <form action="/import-backup" method="post" enctype="multipart/form-data"
-              class="bg-slate-900 border border-slate-800 p-3.5 rounded-lg mb-5 flex flex-wrap items-center justify-between gap-3">
-            <div class="text-xs text-slate-300">
-                <span class="font-semibold text-indigo-400">Migrate from *Arr:</span>
-                Upload a backup <code class="text-slate-200">.zip</code> from Sonarr, Radarr, Lidarr, or Prowlarr
-            </div>
-            <div class="flex items-center gap-2">
-                <input type="file" name="backup_file" accept=".zip" required
-                       class="text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700">
-                <button type="submit" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium">
-                    Import Backup
-                </button>
-            </div>
-        </form>
-
-        <form action="/add" method="post" class="bg-slate-900 border border-slate-800 p-4 rounded-lg mb-6 flex flex-wrap gap-3 items-end">
+        <!-- Quick Add & Search Bar -->
+        <form action="/add" method="post" class="bg-slate-900 border border-slate-800 p-4 rounded-xl mb-6 flex flex-wrap gap-3 items-end">
             <div class="flex-1 min-w-[200px]">
-                <label class="block text-xs text-slate-400 mb-1">Title / Artist - Album</label>
+                <label class="block text-xs text-slate-400 mb-1">Add New Title / Show</label>
                 <input type="text" name="title" required placeholder="e.g. Dune Part Two"
-                       class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
             </div>
             <div class="w-24">
                 <label class="block text-xs text-slate-400 mb-1">Year</label>
                 <input type="number" name="year" placeholder="2024"
-                       class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
             </div>
             <div class="w-32">
                 <label class="block text-xs text-slate-400 mb-1">Type</label>
+                <select name="media_type" id="sticky-media-type" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+                    <option value="movie">Movie</option>
+                    <option value="tv">TV Show</option>
+                    <option value="music">Music</option>
+                </select>
             </div>
             <div class="w-40">
                 <label class="block text-xs text-slate-400 mb-1">Quality Profile</label>
-                <select name="quality_profile" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                <select name="quality_profile" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
                     {% for p in profiles %}
                     <option value="{{ p.name }}">{{ p.name }}</option>
                     {% endfor %}
                     <option value="1080p">1080p</option>
                     <option value="2160p">2160p (4K)</option>
                     <option value="720p">720p</option>
-                    <option value="lossless">Lossless (FLAC)</option>
                     <option value="any">Any</option>
                 </select>
             </div>
-            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded text-sm font-medium">
-                Add & Search
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-sm font-medium shadow">
+                + Add &amp; Search
             </button>
         </form>
 
-        <!-- Library Controls Toolbar: Media Filter + Sort + Tile/List View Toggle -->
-        <div class="bg-slate-900 border border-slate-800 p-3 rounded-lg mb-6 flex flex-wrap items-center justify-between gap-3">
-            <!-- Media Filter Buttons -->
-            <div class="flex flex-wrap items-center gap-1.5">
-                <button type="button" onclick="filterLibrary('all')" id="btn-lib-all"
-                        class="lib-filter-btn bg-indigo-600 text-white px-3 py-1.5 rounded text-xs font-semibold">
-                    All ({{ total_items }})
-                </button>
-                <button type="button" onclick="filterLibrary('movies')" id="btn-lib-movies"
-                        class="lib-filter-btn bg-slate-800 text-slate-300 hover:bg-slate-700 px-3 py-1.5 rounded text-xs font-semibold">
-                    🎬 Movies ({{ total_movies }})
-                </button>
-                <button type="button" onclick="filterLibrary('tv')" id="btn-lib-tv"
-                        class="lib-filter-btn bg-slate-800 text-slate-300 hover:bg-slate-700 px-3 py-1.5 rounded text-xs font-semibold">
-                    📺 TV Shows ({{ total_tv }})
-                </button>
-            </div>
-
-            <!-- Sort Dropdown + Layout Switcher -->
-            <div class="flex flex-wrap items-center gap-2">
-                <form method="get" action="/" class="flex items-center gap-1.5">
-                    <input type="hidden" name="tab" value="library">
-                    <label class="text-xs text-slate-400">Sort:</label>
-                    <select name="sort" onchange="this.form.submit()"
-                            class="bg-slate-800 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200">
-                        <option value="added_desc" {{ 'selected' if sort == 'added_desc' }}>Date Added / Requested (Newest)</option>
-                        <option value="added_asc" {{ 'selected' if sort == 'added_asc' }}>Date Added / Requested (Oldest)</option>
-                        <option value="title_asc" {{ 'selected' if sort == 'title_asc' }}>Title (A → Z)</option>
-                        <option value="title_desc" {{ 'selected' if sort == 'title_desc' }}>Title (Z → A)</option>
-                    </select>
-                </form>
-
-                <div class="flex bg-slate-800 rounded p-0.5 border border-slate-700 text-xs">
-                    <button type="button" onclick="setLayout('grid')" id="btn-view-grid"
-                            class="px-2.5 py-1 rounded bg-indigo-600 text-white font-medium">
-                        ⊞ Tiles
-                    </button>
-                    <button type="button" onclick="setLayout('list')" id="btn-view-list"
-                            class="px-2.5 py-1 rounded text-slate-300 hover:text-white font-medium">
-                        ☰ List
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- MOVIES SECTION -->
-        {% set movies_available = movie_items | selectattr('status', 'equalto', 'available') | list %}
-        {% set movies_wanted = movie_items | rejectattr('status', 'equalto', 'available') | list %}
-
-                <!-- Library Search, Type Filter & Pagination Bar -->
-        <form method="get" action="/" class="flex flex-wrap items-center justify-between gap-3 bg-slate-900/80 border border-slate-800 p-3 rounded-xl mb-6">
+        <!-- Library Quick Search Bar -->
+        <form method="get" action="/" class="bg-slate-900 border border-slate-800 p-3 rounded-xl mb-6 flex flex-wrap items-center justify-between gap-3">
             <input type="hidden" name="tab" value="library">
-            <input type="hidden" name="sort" value="{{ sort }}">
-            <div class="flex flex-wrap items-center gap-2 flex-1 min-w-[240px]">
-                <input type="text" name="q" value="{{ q }}" placeholder="Filter {{ total_items }} titles..."
-                       class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 w-64">
-                <select name="media_type" onchange="this.form.submit()" class="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200">
-                    <option value="">All Types ({{ total_items }})</option>
-                    <option value="movie" {{ 'selected' if media_type == 'movie' }}>Movies</option>
-                    <option value="tv" {{ 'selected' if media_type == 'tv' }}>TV Shows</option>
-                    <option value="music" {{ 'selected' if media_type == 'music' }}>Music</option>
+            <div class="flex flex-1 min-w-[220px] items-center gap-2">
+                <input type="text" name="q" value="{{ q or '' }}" placeholder="Search {{ total_items }} library titles..."
+                       class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100">
+                <select name="media_type" class="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200">
+                    <option value="" {{ 'selected' if not media_type else '' }}>All Types</option>
+                    <option value="movie" {{ 'selected' if media_type == 'movie' else '' }}>Movies ({{ total_movies }})</option>
+                    <option value="tv" {{ 'selected' if media_type == 'tv' else '' }}>TV Shows ({{ total_tv }})</option>
                 </select>
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-xs font-medium">Filter</button>
-                {% if q or media_type %}
-                <a href="/?tab=library&sort={{ sort }}" class="text-xs text-slate-400 hover:text-slate-200 px-2">Reset</a>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded-lg text-xs font-medium text-white">Filter</button>
+                {% if not is_overview %}
+                <a href="/?tab=library" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg text-xs text-slate-300">← Home Overview</a>
                 {% endif %}
             </div>
-            <div class="flex items-center gap-2 text-xs text-slate-400">
-                <span>Page <strong class="text-slate-200">{{ page }}</strong> of <strong class="text-slate-200">{{ total_pages }}</strong> ({{ total_items }} items)</span>
+            {% if not is_overview %}
+            <div class="flex items-center gap-2 text-xs">
+                <span class="text-slate-400">Page {{ page }} of {{ total_pages }}</span>
                 {% if page > 1 %}
-                <a href="/?tab=library&sort={{ sort }}&q={{ q }}&page={{ page - 1 }}"
-                   class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 py-1 rounded text-slate-200">← Prev</a>
+                <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort={{ sort }}&page={{ page - 1 }}" class="bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded">← Prev</a>
                 {% endif %}
                 {% if page < total_pages %}
-                <a href="/?tab=library&sort={{ sort }}&q={{ q }}&page={{ page + 1 }}"
-                   class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 py-1 rounded text-slate-200">Next →</a>
+                <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort={{ sort }}&page={{ page + 1 }}" class="bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded">Next →</a>
                 {% endif %}
             </div>
+            {% endif %}
         </form>
 
-        <section id="section-movies" class="mb-10 space-y-6">
-            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-                <h2 class="text-xl font-bold text-indigo-300">🎬 Movies</h2>
-                <span class="text-xs text-slate-400">{{ movies_available|length }} Available • {{ movies_wanted|length }} Wanted</span>
+        {% if is_overview %}
+        <!-- HOME OVERVIEW: LAST 10 ADDED MOVIES -->
+        <section class="mb-10">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-800 pb-2.5">
+                <a href="/?tab=library&media_type=movie" class="group inline-flex items-center gap-2 text-xl font-bold text-slate-100 hover:text-indigo-400 transition">
+                    <span>🎬 Movies</span>
+                    <span class="text-xs font-normal text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-0.5 rounded-full">Last 10 Added • {{ total_movies }} Total</span>
+                    <span class="text-indigo-400 group-hover:translate-x-1 transition-transform text-base">→</span>
+                </a>
+                <a href="/?tab=library&media_type=movie" class="text-xs font-medium text-indigo-400 hover:text-indigo-300">View All Movies →</a>
             </div>
-
-            <div>
-                <h3 class="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-3">✓ Currently Available ({{ movies_available|length }})</h3>
-                {% if movies_available %}
-                <div class="media-container grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    {% for item in movies_available %}{{ render_card(item) }}{% endfor %}
-                </div>
-                {% else %}
-                <p class="text-xs text-slate-500 bg-slate-900/50 border border-slate-800 rounded-lg p-3">No movies currently on disk.</p>
-                {% endif %}
-            </div>
-
-            <div>
-                <h3 class="text-xs font-bold uppercase tracking-wider text-amber-400 mb-3">⏳ Currently Wanted & Downloading ({{ movies_wanted|length }})</h3>
-                {% if movies_wanted %}
-                <div class="media-container grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    {% for item in movies_wanted %}{{ render_card(item) }}{% endfor %}
-                </div>
-                {% else %}
-                <p class="text-xs text-slate-500 bg-slate-900/50 border border-slate-800 rounded-lg p-3">No wanted movies right now.</p>
-                {% endif %}
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+                {% for item in recent_movies %}
+                    {{ render_card(item) }}
+                {% endfor %}
             </div>
         </section>
 
-        <!-- TV SHOWS SECTION -->
-        {% set tv_available = tv_items | selectattr('status', 'equalto', 'available') | list %}
-        {% set tv_wanted = tv_items | rejectattr('status', 'equalto', 'available') | list %}
-
-        <section id="section-tv" class="mb-10 space-y-6">
-            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-                <h2 class="text-xl font-bold text-indigo-300">📺 TV Shows</h2>
-                <span class="text-xs text-slate-400">{{ tv_available|length }} With Grabbed Episodes • {{ tv_wanted|length }} Wanted</span>
+        <!-- HOME OVERVIEW: LAST 10 UPDATED TV SHOWS -->
+        <section class="mb-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-800 pb-2.5">
+                <a href="/?tab=library&media_type=tv" class="group inline-flex items-center gap-2 text-xl font-bold text-slate-100 hover:text-indigo-400 transition">
+                    <span>📺 TV Shows</span>
+                    <span class="text-xs font-normal text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-0.5 rounded-full">Last 10 Updated • {{ total_tv }} Total</span>
+                    <span class="text-indigo-400 group-hover:translate-x-1 transition-transform text-base">→</span>
+                </a>
+                <a href="/?tab=library&media_type=tv" class="text-xs font-medium text-indigo-400 hover:text-indigo-300">View All TV Shows →</a>
             </div>
-
-            <div>
-                <h3 class="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-3">✓ Currently Available / Episodes Grabbed ({{ tv_available|length }})</h3>
-                {% if tv_available %}
-                <div class="media-container grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    {% for item in tv_available %}{{ render_card(item) }}{% endfor %}
-                </div>
-                {% else %}
-                <p class="text-xs text-slate-500 bg-slate-900/50 border border-slate-800 rounded-lg p-3">No TV shows with grabbed episodes yet.</p>
-                {% endif %}
-            </div>
-
-            <div>
-                <h3 class="text-xs font-bold uppercase tracking-wider text-amber-400 mb-3">⏳ Currently Wanted & Downloading ({{ tv_wanted|length }})</h3>
-                {% if tv_wanted %}
-                <div class="media-container grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    {% for item in tv_wanted %}{{ render_card(item) }}{% endfor %}
-                </div>
-                {% else %}
-                <p class="text-xs text-slate-500 bg-slate-900/50 border border-slate-800 rounded-lg p-3">No wanted TV shows right now.</p>
-                {% endif %}
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+                {% for item in recent_tv %}
+                    {{ render_card(item) }}
+                {% endfor %}
             </div>
         </section>
-        {% if total_pages > 1 %}
-        <div class="flex items-center justify-center gap-3 mt-4 mb-8 py-3 text-xs">
-            {% if page > 1 %}
-            <a href="/?tab=library&sort={{ sort }}&q={{ q }}&page={{ page - 1 }}"
-               class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3.5 py-1.5 rounded-lg text-slate-200">← Previous Page</a>
-            {% endif %}
-            <span class="text-slate-400">Page <strong class="text-slate-200">{{ page }}</strong> of <strong class="text-slate-200">{{ total_pages }}</strong></span>
-            {% if page < total_pages %}
-            <a href="/?tab=library&sort={{ sort }}&q={{ q }}&page={{ page + 1 }}"
-               class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3.5 py-1.5 rounded-lg text-slate-200">Next Page →</a>
-            {% endif %}
+        {% else %}
+        <!-- PAGINATED DRILL-DOWN LIBRARY VIEW -->
+        <section class="mb-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-800 pb-2.5">
+                <h2 class="text-xl font-bold text-slate-100">
+                    {% if media_type == 'movie' %}🎬 All Movies ({{ total_movies }})
+                    {% elif media_type == 'tv' %}📺 All TV Shows ({{ total_tv }})
+                    {% else %}🔍 Search Results ({{ items|length }}){% endif %}
+                </h2>
+                <div class="flex items-center gap-2 text-xs">
+                    <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort=newest&page=1" class="px-2.5 py-1 rounded {{ 'bg-indigo-600 text-white' if sort == 'newest' else 'bg-slate-800 text-slate-300' }}">Newest</a>
+                    <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort=title_asc&page=1" class="px-2.5 py-1 rounded {{ 'bg-indigo-600 text-white' if sort == 'title_asc' else 'bg-slate-800 text-slate-300' }}">A–Z</a>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+                {% for item in items %}
+                    {{ render_card(item) }}
+                {% endfor %}
+            </div>
+            <div class="mt-6 flex items-center justify-between bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl text-xs">
+                <span class="text-slate-400">Showing page {{ page }} of {{ total_pages }}</span>
+                <div class="flex gap-2">
+                    {% if page > 1 %}
+                    <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort={{ sort }}&page={{ page - 1 }}" class="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-200">← Previous Page</a>
+                    {% endif %}
+                    {% if page < total_pages %}
+                    <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort={{ sort }}&page={{ page + 1 }}" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-white font-medium">Next Page →</a>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+        {% endif %}
+        {% endif %}
+        {% if active_tab == 'activity' %}
+        <div class="space-y-6">
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+                    <div>
+                        <h2 class="text-lg font-semibold text-indigo-300">Live qBittorrent Activity Queue</h2>
+                        <p class="text-xs text-slate-400">Active &amp; completed torrents in category <span class="font-mono text-slate-300">{{ cfg.qbit_category }}</span></p>
+                    </div>
+                    <button type="button" onclick="loadActivityTab()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium">↻ Refresh Queue</button>
+                </div>
+                <div id="activity-queue-box" class="text-xs text-slate-400">Loading qBittorrent queue...</div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+                    <div>
+                        <h2 class="text-lg font-semibold text-indigo-300">Manual Import Scanner</h2>
+                        <p class="text-xs text-slate-400">Scan <span class="font-mono text-slate-300">{{ cfg.qbit_local_mount }}</span> for video files and map them to any library item</p>
+                    </div>
+                    <button type="button" onclick="loadManualImportFiles()" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded text-xs font-medium text-white">Scan Download Mount</button>
+                </div>
+                <div id="manual-import-box" class="text-xs text-slate-400">Click <strong>Scan Download Mount</strong> to list files available for manual import.</div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
+                <h2 class="text-base font-semibold text-rose-300 border-b border-slate-800 pb-2 mb-3">Recently Blacklisted Releases</h2>
+                <div id="blacklist-box" class="text-xs text-slate-400">Loading blacklist history...</div>
+            </div>
         </div>
         {% endif %}
-        {% endif %}
 
-        <!-- TAB 2: MEDIA MANAGEMENT -->
-        {% if active_tab == 'media' %}
+        {% if active_tab == 'settings' %}
+        <div class="mb-6 bg-slate-900 border border-slate-800 rounded-xl p-4">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div>
+                    <h2 class="text-lg font-bold text-indigo-300">⚙️ Settings &amp; Configuration</h2>
+                    <p class="text-xs text-slate-400">Manage storage drives, quality profiles, indexers, download clients, Plex/Kometa integration, and *Arr migrations.</p>
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-1.5 border-t border-slate-800 pt-3 text-xs font-medium">
+                {% set sec_tabs = [
+                    ('media', '💾 Media Management & Drives'),
+                    ('profiles', '🎚️ Profiles & Custom Formats'),
+                    ('indexers', '🔎 Indexers (' ~ indexers|length ~ ')'),
+                    ('clients', '⬇️ Download Clients'),
+                    ('connect', '🔌 Connect, Kometa & Backup')
+                ] %}
+                {% for skey, slabel in sec_tabs %}
+                <a href="/?tab=settings&section={{ skey }}"
+                   class="px-3.5 py-1.5 rounded-lg transition {{ 'bg-indigo-600 text-white shadow' if settings_section == skey else 'bg-slate-800/80 text-slate-300 hover:bg-slate-700' }}">
+                    {{ slabel }}
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+
+        {% if settings_section == 'media' %}
         <div class="grid md:grid-cols-2 gap-6">
             <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
                 <input type="hidden" name="section" value="media">
@@ -487,45 +483,73 @@
                 </button>
             </form>
 
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-xs">
-                    <thead class="bg-slate-800/70 text-slate-300 uppercase">
-                        <tr>
-                            <th class="px-3 py-2">Type</th>
-                            <th class="px-3 py-2">Path</th>
-                            <th class="px-3 py-2">Status & Free Space</th>
-                            <th class="px-3 py-2 text-right">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-800">
-                        {% for rf in root_folders %}
-                        <tr class="hover:bg-slate-800/40">
-                            <td class="px-3 py-2.5 uppercase font-semibold text-indigo-300">{{ rf.media_type }}</td>
-                            <td class="px-3 py-2.5 font-mono text-slate-200">{{ rf.path }}</td>
-                            <td class="px-3 py-2.5">
-                                {% if rf.exists %}
-                                    <span class="bg-emerald-500/15 text-emerald-300 px-2 py-0.5 rounded">✓ Accessible ({{ rf.free_gb }} GB free)</span>
-                                {% else %}
-                                    <span class="bg-rose-500/15 text-rose-300 px-2 py-0.5 rounded">✕ Path not found</span>
-                                {% endif %}
-                            </td>
-                            <td class="px-3 py-2.5 text-right">
-                                <form action="/settings/roots/delete" method="post" class="inline">
+            <div class="space-y-3 mt-4">
+                {% set rf_groups = [
+                    ('movie', '🎬 Movies'),
+                    ('tv', '📺 TV Shows'),
+                    ('music', '🎵 Music')
+                ] %}
+                {% for gtype, glabel in rf_groups %}
+                {% set gfolders = root_folders | selectattr('media_type', 'equalto', gtype) | list %}
+                <details class="bg-slate-950/70 border border-slate-800 rounded-xl overflow-hidden group">
+                    <summary class="flex items-center justify-between px-4 py-3 cursor-pointer select-none hover:bg-slate-800/50 transition">
+                        <div class="flex items-center gap-2.5">
+                            <span class="text-slate-400 text-xs transition-transform group-open:rotate-90">▶</span>
+                            <span class="font-semibold text-sm text-slate-100">{{ glabel }}</span>
+                            <span class="text-xs text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-0.5 rounded-full">
+                                {{ gfolders|length }} folder{{ 's' if gfolders|length != 1 else '' }}
+                            </span>
+                        </div>
+                        <span class="text-xs text-indigo-400 group-open:hidden">Click to expand</span>
+                        <span class="text-xs text-slate-400 hidden group-open:inline">Click to collapse</span>
+                    </summary>
+                    <div class="border-t border-slate-800">
+                        {% if gfolders %}
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-slate-900/90 text-slate-400 uppercase text-[11px]">
+                                <tr>
+                                    <th class="px-4 py-2.5">Directory Path</th>
+                                    <th class="px-4 py-2.5">Status &amp; Free Space</th>
+                                    <th class="px-4 py-2.5 text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-800/80">
+                                {% for rf in gfolders %}
+                                <tr class="hover:bg-slate-800/40 transition">
+                                    <td class="px-4 py-2.5 font-mono text-slate-200">{{ rf.path }}</td>
+                                    <td class="px-4 py-2.5">
+                                        {% if rf.accessible is not defined or rf.accessible %}
+                                        <span class="inline-flex items-center gap-1 bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 px-2.5 py-0.5 rounded-full text-[11px]">
+                                            ✓ Accessible ({{ rf.free_gb }} GB free)
+                                        </span>
+                                        {% else %}
+                                        <span class="inline-flex items-center gap-1 bg-rose-950/80 text-rose-300 border border-rose-800/60 px-2.5 py-0.5 rounded-full text-[11px]">
+                                            ✕ Unreachable
+                                        </span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="px-4 py-2.5 text-right">
+                                        <form action="/settings/roots/delete" method="post" class="inline">
                                     <input type="hidden" name="media_type" value="{{ rf.media_type }}">
                                     <input type="hidden" name="path" value="{{ rf.path }}">
                                     <button type="submit" class="text-rose-400 hover:text-rose-300">Remove</button>
                                 </form>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% else %}
+                        <p class="px-4 py-3 text-xs text-slate-500">No root folders configured for {{ glabel }} yet.</p>
+                        {% endif %}
+                    </div>
+                </details>
+                {% endfor %}
             </div>
         </div>
-    {% endif %}
+        {% endif %}
 
-    <!-- TAB 3: PROFILES & CUSTOM FORMATS -->
-        {% if active_tab == 'profiles' %}
+        {% if settings_section == 'profiles' %}
         <div class="space-y-6 max-w-4xl">
             <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
                 <input type="hidden" name="section" value="profiles">
@@ -608,8 +632,7 @@
         </div>
         {% endif %}
 
-        <!-- TAB 4: INDEXERS -->
-        {% if active_tab == 'indexers' %}
+        {% if settings_section == 'indexers' %}
         <div class="space-y-6 max-w-4xl">
             <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
                 <input type="hidden" name="section" value="indexers">
@@ -650,41 +673,7 @@
         </div>
         {% endif %}
 
-
-        <!-- TAB: ACTIVITY & MANUAL IMPORT -->
-        {% if active_tab == 'activity' %}
-        <div class="space-y-6">
-            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
-                <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
-                    <div>
-                        <h2 class="text-lg font-semibold text-indigo-300">Live qBittorrent Activity Queue</h2>
-                        <p class="text-xs text-slate-400">Active &amp; completed torrents in category <span class="font-mono text-slate-300">{{ cfg.qbit_category }}</span></p>
-                    </div>
-                    <button type="button" onclick="loadActivityTab()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium">↻ Refresh Queue</button>
-                </div>
-                <div id="activity-queue-box" class="text-xs text-slate-400">Loading qBittorrent queue...</div>
-            </div>
-
-            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
-                <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
-                    <div>
-                        <h2 class="text-lg font-semibold text-indigo-300">Manual Import Scanner</h2>
-                        <p class="text-xs text-slate-400">Scan <span class="font-mono text-slate-300">{{ cfg.qbit_local_mount }}</span> for video files and map them to any library item</p>
-                    </div>
-                    <button type="button" onclick="loadManualImportFiles()" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded text-xs font-medium text-white">Scan Download Mount</button>
-                </div>
-                <div id="manual-import-box" class="text-xs text-slate-400">Click <strong>Scan Download Mount</strong> to list files available for manual import.</div>
-            </div>
-
-            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
-                <h2 class="text-base font-semibold text-rose-300 border-b border-slate-800 pb-2 mb-3">Recently Blacklisted Releases</h2>
-                <div id="blacklist-box" class="text-xs text-slate-400">Loading blacklist history...</div>
-            </div>
-        </div>
-        {% endif %}
-
-        <!-- TAB 5: DOWNLOAD CLIENTS -->
-        {% if active_tab == 'clients' %}
+        {% if settings_section == 'clients' %}
         <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4 max-w-3xl">
             <input type="hidden" name="section" value="clients">
             <div class="flex justify-between items-center border-b border-slate-800 pb-2">
@@ -727,8 +716,7 @@
         </form>
         {% endif %}
 
-        <!-- TAB 6: CONNECT & GENERAL -->
-        {% if active_tab == 'connect' %}
+        {% if settings_section == 'connect' %}
         <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-6 max-w-3xl">
             <input type="hidden" name="section" value="connect">
 
@@ -846,245 +834,43 @@
 
             <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save General & Connect Settings</button>
         </form>
+        
+        <div class="mt-6 bg-slate-900 border border-slate-800 p-5 rounded-xl">
+            <h3 class="text-base font-bold text-indigo-300 mb-1">📦 Migrate from *Arr Backup</h3>
+            <p class="text-xs text-slate-400 mb-3">Import existing libraries, quality profiles, and indexers from a Sonarr, Radarr, Lidarr, or Prowlarr <code class="text-slate-200">.zip</code> backup.</p>
+            <form action="/import-backup" method="post" enctype="multipart/form-data" class="flex flex-wrap items-center gap-3">
+                <input type="file" name="backup_file" accept=".zip" required
+                       class="text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700">
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-1.5 rounded-lg text-xs font-semibold text-white">
+                    Import Backup
+                </button>
+            </form>
+        </div>
         {% endif %}
-    </div>
+        {% endif %}
 
-    <script>
-        function toggleSecret(id) { const el = document.getElementById(id); if (el) el.type = (el.type === 'password') ? 'text' : 'password'; }
-        function copySeerrBundle(btn) {
-            const key = document.getElementById('omniarr-api-key-input').value;
-            const info = `Host: ${window.location.hostname}\nPort: ${window.location.port || '8585'}\nSSL: Off\nAPI Key: ${key}`;
-            const ta = document.createElement('textarea');
-            ta.value = info;
-            document.body.appendChild(ta);
-            ta.select();
-            document.execCommand('copy');
-            document.body.removeChild(ta);
-            btn.textContent = '✓ Copied Seerr Info';
-            setTimeout(() => btn.textContent = '📋 Copy Seerr Connection Info', 1800);
-        }
-        (async function loadHealth() {
-            try {
-                const res = await fetch('/api/health');
-                if (!res.ok) return;
-                const d = await res.json();
-                const setDot = (id, s) => {
-                    const el = document.getElementById(id);
-                    if (!el) return;
-                    el.className = 'w-2 h-2 rounded-full ' + (!s.configured ? 'bg-slate-600' : (s.ok ? 'bg-emerald-400' : 'bg-rose-500'));
-                };
-                setDot('dot-prowlarr', d.prowlarr);
-                setDot('dot-qbit', d.qbittorrent);
-                setDot('dot-media', d.media);
-                const lbl = document.getElementById('lbl-media');
-                if (lbl && d.media && d.media.label) lbl.textContent = d.media.label;
-            } catch (e) {}
-        })();
-        async function toggleEpisodes(mediaId) {
-            const box = document.getElementById(`eps-${mediaId}`);
-            if (!box) return;
-            box.classList.toggle('hidden');
-            if (box.classList.contains('hidden') || box.dataset.loaded === 'true') return;
-            box.innerHTML = '<p class="text-xs text-slate-400 py-2">Loading episodes...</p>';
-            const res = await fetch(`/api/media/${mediaId}/episodes`);
-            const eps = await res.json();
-            let rows = eps.map(ep => {
-                const s = String(ep.season).padStart(2, '0');
-                const e = String(ep.episode).padStart(2, '0');
-                return `<tr>
-                    <td class="px-2 py-1 font-mono text-indigo-300 whitespace-nowrap">S${s}E${e}</td>
-                    <td class="px-2 py-1 text-slate-200">${ep.title}</td>
-                    <td class="px-2 py-1 text-slate-400 font-mono truncate max-w-[160px]">${ep.release}</td>
-                </tr>`;
-            }).join('');
-            box.innerHTML = `<table class="w-full text-left text-xs">
-                <thead class="text-slate-400 uppercase bg-slate-800/50">
-                    <tr><th class="px-2 py-1">Ep</th><th class="px-2 py-1">Title</th><th class="px-2 py-1">Release</th></tr>
-                </thead>
-                <tbody class="divide-y divide-slate-800/70">${rows}</tbody>
-            </table>`;
-            box.dataset.loaded = 'true';
-        }
-        function filterLibrary(type) {
-            const m = document.getElementById('section-movies');
-            const t = document.getElementById('section-tv');
-            if (m) m.style.display = (type === 'all' || type === 'movies') ? 'block' : 'none';
-            if (t) t.style.display = (type === 'all' || type === 'tv') ? 'block' : 'none';
-            document.querySelectorAll('.lib-filter-btn').forEach(btn => {
-                btn.className = 'lib-filter-btn bg-slate-800 text-slate-300 hover:bg-slate-700 px-3 py-1.5 rounded text-xs font-semibold';
-            });
-            const active = document.getElementById('btn-lib-' + type);
-            if (active) active.className = 'lib-filter-btn bg-indigo-600 text-white px-3 py-1.5 rounded text-xs font-semibold';
-        }
-        function setLayout(mode) {
-            localStorage.setItem('omniarr_layout', mode);
-            const isList = mode === 'list';
-            document.querySelectorAll('.media-container').forEach(c => {
-                c.className = isList
-                    ? 'media-container flex flex-col gap-3'
-                    : 'media-container grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4';
-            });
-            document.querySelectorAll('.card-inner').forEach(el => {
-                el.className = isList ? 'card-inner flex flex-row items-center' : 'card-inner flex flex-col h-full';
-            });
-            document.querySelectorAll('.poster-box').forEach(el => {
-                el.className = isList
-                    ? 'poster-box relative w-24 h-36 bg-slate-800 overflow-hidden flex-shrink-0'
-                    : 'poster-box relative w-full aspect-[2/3] bg-slate-800 overflow-hidden flex-shrink-0';
-            });
-            document.querySelectorAll('.grid-badge').forEach(el => el.classList.toggle('hidden', isList));
-            document.querySelectorAll('.list-badge').forEach(el => el.classList.toggle('hidden', !isList));
-            document.querySelectorAll('.list-path').forEach(el => el.classList.toggle('hidden', !isList));
-
-            const gBtn = document.getElementById('btn-view-grid');
-            const lBtn = document.getElementById('btn-view-list');
-            if (gBtn && lBtn) {
-                gBtn.className = isList ? 'px-2.5 py-1 rounded text-slate-300 hover:text-white font-medium' : 'px-2.5 py-1 rounded bg-indigo-600 text-white font-medium';
-                lBtn.className = isList ? 'px-2.5 py-1 rounded bg-indigo-600 text-white font-medium' : 'px-2.5 py-1 rounded text-slate-300 hover:text-white font-medium';
-            }
-        }
-        async function testConn(service) {
-            const el = document.getElementById('test-' + service);
-            el.textContent = 'Testing connection...';
-            el.className = 'text-xs text-amber-300';
-            const res = await fetch('/settings/test/' + service, { method: 'POST' });
-            const data = await res.json();
-            el.textContent = data.detail;
-            el.className = data.ok ? 'text-xs text-emerald-400 font-medium' : 'text-xs text-rose-400 font-medium';
-        }
-        document.addEventListener('DOMContentLoaded', () => {
-            const saved = localStorage.getItem('omniarr_layout');
-            if (saved === 'list') setLayout('list');
-        });
-    </script>
-    <!-- Sonarr/Radarr Style Drive & Folder Browser Modal -->
-    <div id="folder-browser-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-        <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-2xl max-h-[82vh] flex flex-col shadow-2xl">
-            <div class="p-4 border-b border-slate-800 flex items-center justify-between">
-                <div>
-                    <h3 class="text-base font-bold text-indigo-300">Select Drive or Media Folder</h3>
-                    <p class="text-xs text-slate-400">Pick an available mount below or drill into subfolders</p>
+        {% if active_tab in ('history', 'activity_logs') %}
+        <div class="space-y-6">
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+                    <div>
+                        <h2 class="text-lg font-semibold text-indigo-300">Audit Trail &amp; Activity History</h2>
+                        <p class="text-xs text-slate-400">Recent grabs, imports, cross-drive folder moves, disk scans, and blacklisted releases</p>
+                    </div>
+                    <button type="button" onclick="loadHistoryAndLogs()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs">↻ Refresh</button>
                 </div>
-                <button type="button" onclick="closeFolderBrowser()" class="bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded text-xs text-slate-300">✕</button>
+                <div id="history-events-box" class="text-xs text-slate-400">Loading history events...</div>
             </div>
 
-            <!-- Current Path Bar -->
-            <div class="px-4 py-2.5 bg-slate-950 border-b border-slate-800 flex items-center gap-2">
-                <button type="button" id="fb-up-btn" onclick="browseUp()" class="bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded text-xs text-slate-200">
-                    ⬆ Up
-                </button>
-                <input type="text" id="fb-current-path" placeholder="Mounted Drives Overview"
-                       class="flex-1 bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-xs font-mono text-indigo-300">
-                <button type="button" onclick="loadFolderPath(document.getElementById('fb-current-path').value)"
-                        class="bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded text-xs text-slate-200">
-                    Go
-                </button>
-            </div>
-
-            <!-- Drives & Folders List -->
-            <div id="fb-list" class="p-4 overflow-y-auto flex-1 space-y-1.5 text-xs"></div>
-
-            <!-- Create Subfolder + Confirm Selection -->
-            <div class="p-3.5 border-t border-slate-800 bg-slate-950/70 flex flex-wrap items-center justify-between gap-2">
-                <div class="flex items-center gap-1.5">
-                    <input type="text" id="fb-new-subfolder" placeholder="New subfolder name (e.g. Movies)"
-                           class="bg-slate-800 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 w-52">
-                    <button type="button" onclick="appendSubfolder()"
-                            class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 py-1.5 rounded text-xs text-slate-300">
-                        + Append Subfolder
-                    </button>
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-3">
+                    <h2 class="text-base font-semibold text-emerald-300">Live Service Logs (journalctl -u omniarr)</h2>
+                    <button type="button" onclick="loadHistoryAndLogs()" class="text-xs text-slate-400 hover:text-white">Reload Tail</button>
                 </div>
-                <div class="flex items-center gap-2">
-                    <button type="button" onclick="closeFolderBrowser()" class="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded text-xs text-slate-300">
-                        Cancel
-                    </button>
-                    <button type="button" onclick="confirmFolderSelection()" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-1.5 rounded text-xs font-semibold text-white">
-                        ✓ Select This Folder
-                    </button>
-                </div>
+                <pre id="system-logs-pre" class="bg-slate-950 border border-slate-800 rounded-lg p-3.5 text-[11px] font-mono text-slate-300 overflow-x-auto max-h-96 whitespace-pre-wrap">Loading service logs...</pre>
             </div>
         </div>
-    </div>
-
-    <script>
-        let fbParentPath = '';
-
-        async function openFolderBrowser() {
-            document.getElementById('folder-browser-modal').classList.remove('hidden');
-            const existing = document.getElementById('root-path-input').value.trim();
-            await loadFolderPath(existing || '');
-        }
-
-        function closeFolderBrowser() {
-            document.getElementById('folder-browser-modal').classList.add('hidden');
-        }
-
-        function browseUp() {
-            loadFolderPath(fbParentPath || '');
-        }
-
-        function appendSubfolder() {
-            const cur = document.getElementById('fb-current-path').value.trim().replace(/\/+$/, '');
-            const sub = document.getElementById('fb-new-subfolder').value.trim().replace(/^\/+|\/+$/g, '');
-            if (!cur || !sub) return;
-            document.getElementById('fb-current-path').value = `${cur}/${sub}`;
-            document.getElementById('fb-new-subfolder').value = '';
-        }
-
-        function confirmFolderSelection() {
-            const chosen = document.getElementById('fb-current-path').value.trim();
-            if (chosen) {
-                document.getElementById('root-path-input').value = chosen;
-            }
-            closeFolderBrowser();
-        }
-
-        async function loadFolderPath(targetPath) {
-            const listEl = document.getElementById('fb-list');
-            const pathInput = document.getElementById('fb-current-path');
-            listEl.innerHTML = '<p class="text-slate-400">Scanning mounted drives and folders...</p>';
-
-            const res = await fetch(`/api/filesystem?path=${encodeURIComponent(targetPath)}`);
-            const data = await res.json();
-            pathInput.value = data.current_path;
-            fbParentPath = data.parent_path || '';
-
-            let html = '';
-
-            // Always show quick-jump available drives section at top when at root or overview
-            if (!data.current_path) {
-                html += '<div class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">Available Mounted Drives & Volumes</div>';
-                data.mounts.forEach(m => {
-                    html += `
-                        <button type="button" onclick="loadFolderPath('${m.path.replace(/'/g, "\'")}')"
-                                class="w-full flex items-center justify-between bg-slate-800/70 hover:bg-indigo-600/20 border border-slate-700 hover:border-indigo-500/50 px-3 py-2.5 rounded text-left transition">
-                            <span class="font-mono text-slate-100 font-semibold">💾 ${m.path} <span class="text-[10px] text-slate-500">(${m.fstype})</span></span>
-                            <span class="text-emerald-400 font-mono">${m.free_gb} GB free / ${m.total_gb} GB</span>
-                        </button>`;
-                });
-            } else {
-                html += `
-                    <button type="button" onclick="loadFolderPath('')"
-                            class="w-full flex items-center gap-2 bg-slate-800/40 hover:bg-slate-800 border border-slate-800 px-3 py-2 rounded text-left text-indigo-300 mb-2">
-                        <span>💾 Back to All Mounted Drives (${data.mounts.length})</span>
-                    </button>`;
-
-                if (data.directories.length === 0) {
-                    html += '<p class="text-slate-500 py-3 px-2">No subdirectories inside this folder. Click "Select This Folder" or append a subfolder name below.</p>';
-                } else {
-                    data.directories.forEach(d => {
-                        html += `
-                            <button type="button" onclick="loadFolderPath('${d.path.replace(/'/g, "\'")}')"
-                                    class="w-full flex items-center justify-between bg-slate-800/60 hover:bg-slate-800 border border-slate-800 px-3 py-2 rounded text-left transition">
-                                <span class="font-mono text-slate-200">📁 ${d.name}</span>
-                                <span class="text-slate-500 text-[11px]">Open →</span>
-                            </button>`;
-                    });
-                }
-            }
-            listEl.innerHTML = html;
-        }
-    </script>
+        {% endif %}
 
     <!-- Interactive Manual Search Modal -->
     <div id="manual-search-modal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1353,6 +1139,188 @@
         if (document.getElementById('activity-queue-box')) {
             loadActivityTab();
             setInterval(loadActivityTab, 10000);
+        }
+
+
+        async function runNormalizeTitles(btn) {
+            await fetch('/api/library/normalize-titles-bg', {method: 'POST'});
+            pollBackgroundTasks();
+        }
+
+        async function runDiskLibraryScan(btn) {
+            await fetch('/api/library/scan-disk-bg', {method: 'POST'});
+            pollBackgroundTasks();
+        }
+        async function testPushNotifications(btn) {
+            btn.disabled = true; btn.textContent = 'Sending...';
+            await fetch('/api/notifications/test', {method: 'POST'});
+            alert('Test notification dispatched to all configured channels!');
+            btn.disabled = false; btn.textContent = 'Send Test Alert';
+        }
+        async function loadHistoryAndLogs() {
+            const evBox = document.getElementById('history-events-box');
+            const logPre = document.getElementById('system-logs-pre');
+            if (!evBox) return;
+            const [hRes, lRes] = await Promise.all([fetch('/api/history'), fetch('/api/system/logs')]);
+            const hData = await hRes.json();
+            const lData = await lRes.json();
+            if (!hData.events || !hData.events.length) {
+                evBox.innerHTML = '<div class="text-slate-500 py-3">No history events recorded yet.</div>';
+            } else {
+                const badge = (t) => ({
+                    import: 'bg-emerald-500/20 text-emerald-300',
+                    move: 'bg-indigo-500/20 text-indigo-300',
+                    grab: 'bg-amber-500/20 text-amber-300',
+                    blacklist: 'bg-rose-500/20 text-rose-300',
+                    scan: 'bg-cyan-500/20 text-cyan-300',
+                }[t] || 'bg-slate-800 text-slate-300');
+                evBox.innerHTML = '<div class="divide-y divide-slate-800/80">' + hData.events.map(e => `
+                    <div class="py-2 flex flex-wrap items-center justify-between gap-2">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <span class="px-2 py-0.5 rounded uppercase text-[10px] font-semibold ${badge(e.type)}">${e.type}</span>
+                            ${e.media_id ? `<a href="/media/${e.media_id}" class="text-slate-200 hover:text-indigo-400 font-medium">${e.title}</a>` : `<span class="text-slate-200 font-medium">${e.title}</span>`}
+                            <span class="text-slate-500 font-mono truncate">${e.detail}</span>
+                        </div>
+                        <span class="text-slate-500 whitespace-nowrap">${e.date}</span>
+                    </div>`).join('') + '</div>';
+            }
+            if (logPre && lData.logs) {
+                logPre.textContent = lData.logs;
+                logPre.scrollTop = logPre.scrollHeight;
+            }
+        }
+        if (document.getElementById('history-events-box')) {
+            loadHistoryAndLogs();
+        }
+
+
+        async function startBgPosterSync() {
+            await fetch('/api/posters/sync-bg', {method: 'POST'});
+            pollBackgroundTasks();
+        }
+        async function pollBackgroundTasks() {
+            const pill = document.getElementById('bg-task-pill');
+            const dot = document.getElementById('bg-task-dot');
+            const txt = document.getElementById('bg-task-text');
+            if (!pill || !txt) return;
+            try {
+                const res = await fetch('/api/tasks/status');
+                const data = await res.json();
+                const tasks = data.tasks || [];
+                const running = tasks.filter(t => t.state === 'running');
+                const latest = running[0] || tasks[tasks.length - 1];
+                if (!latest) {
+                    pill.classList.add('hidden');
+                    return;
+                }
+                pill.classList.remove('hidden');
+                pill.classList.add('flex');
+                if (running.length > 0) {
+                    dot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-ping';
+                    txt.textContent = `${latest.label}: ${latest.detail}`;
+                } else if (latest.state === 'error') {
+                    dot.className = 'w-2 h-2 rounded-full bg-rose-500';
+                    txt.textContent = `${latest.label} error: ${latest.detail}`;
+                } else {
+                    dot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+                    txt.textContent = `${latest.label}: ${latest.detail}`;
+                }
+            } catch (e) {}
+        }
+        pollBackgroundTasks();
+        setInterval(pollBackgroundTasks, 2500);
+
+    </script>
+
+    <div id="bulk-move-bar" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 border border-indigo-500/60 shadow-2xl rounded-2xl px-5 py-3 flex items-center gap-3 backdrop-blur">
+        <span id="bulk-move-count" class="text-xs font-bold text-indigo-300">0 selected</span>
+        <select id="bulk-move-target" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100">
+            <option value="">Choose destination root drive...</option>
+            {% for rf in root_folders %}
+            <option value="{{ rf.path }}">{{ rf.path }} ({{ rf.media_type }})</option>
+            {% endfor %}
+        </select>
+        <button type="button" onclick="executeBulkMove()" class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white">🚚 Move Selected</button>
+        <button type="button" onclick="clearBulkSelection()" class="text-xs text-slate-400 hover:text-slate-200 px-2">Clear</button>
+    </div>
+    <script>
+        function updateBulkMoveBar() {
+            const cbs = Array.from(document.querySelectorAll('.bulk-item-cb:checked'));
+            const bar = document.getElementById('bulk-move-bar');
+            const cnt = document.getElementById('bulk-move-count');
+            if (!bar || !cnt) return;
+            if (cbs.length === 0) {
+                bar.classList.add('hidden');
+            } else {
+                bar.classList.remove('hidden');
+                cnt.textContent = `${cbs.length} title(s) selected`;
+            }
+        }
+        function clearBulkSelection() {
+            document.querySelectorAll('.bulk-item-cb:checked').forEach(cb => cb.checked = false);
+            updateBulkMoveBar();
+        }
+        async function executeBulkMove() {
+            const ids = Array.from(document.querySelectorAll('.bulk-item-cb:checked')).map(cb => parseInt(cb.value, 10));
+            const target = document.getElementById('bulk-move-target').value;
+            if (!ids.length || !target) {
+                alert('Select at least one title and a destination root drive.');
+                return;
+            }
+            if (!confirm(`Move ${ids.length} folder(s) to ${target} in the background?`)) return;
+            const res = await fetch('/api/library/bulk-move', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({item_ids: ids, target_root: target})
+            });
+            const data = await res.json();
+            if (!data.ok) {
+                alert(data.error || 'Failed to start bulk move.');
+                return;
+            }
+            clearBulkSelection();
+            if (typeof pollBackgroundTasks === 'function') pollBackgroundTasks();
+        }
+        async function loadDriveStats() {
+            const grid = document.getElementById('drive-storage-grid');
+            if (!grid) return;
+            try {
+                const res = await fetch('/api/storage/drives');
+                const data = await res.json();
+                const drives = data.drives || [];
+                if (!drives.length) {
+                    grid.innerHTML = '<div class="text-slate-500">No mounted root drives found.</div>';
+                    return;
+                }
+                grid.innerHTML = drives.map(d => {
+                    const barColor = d.used_pct > 90 ? 'bg-rose-500' : (d.used_pct > 75 ? 'bg-amber-400' : 'bg-emerald-500');
+                    return `<div class="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                        <div class="flex justify-between font-semibold text-slate-200 mb-1">
+                            <span class="truncate" title="${d.local_path}">${d.local_path}</span>
+                            <span class="text-emerald-300 ml-2 whitespace-nowrap">${d.free_gb} GB free</span>
+                        </div>
+                        <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden mb-1.5">
+                            <div class="${barColor} h-full" style="width:${d.used_pct}%"></div>
+                        </div>
+                        <div class="flex justify-between text-[11px] text-slate-400">
+                            <span>${d.used_gb} / ${d.total_gb} GB (${d.used_pct}%)</span>
+                            <span>${d.item_count} titles</span>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (e) {}
+        }
+        loadDriveStats();
+
+        async function triggerRematchAllPosters() {
+            if (!confirm('Clear all cached posters and rematch the entire library from Plex, Kometa assets, and metadata APIs?')) return;
+            const res = await fetch('/api/posters/rematch-all', {method: 'POST'});
+            const data = await res.json();
+            if (!data.ok) {
+                alert(data.error || 'Poster rematch already running.');
+                return;
+            }
+            if (typeof pollBackgroundTasks === 'function') pollBackgroundTasks();
         }
     </script>
 </body>

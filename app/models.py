@@ -76,3 +76,14 @@ class BlacklistedRelease(Base):
     release_title = Column(String, index=True, default="")
     reason = Column(String, default="Failed or stalled")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class HistoryEvent(Base):
+    __tablename__ = "history_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_type = Column(String, index=True, default="info")  # grab, import, move, blacklist, scan
+    media_item_id = Column(Integer, index=True, nullable=True)
+    title = Column(String, default="")
+    detail = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)

@@ -5,7 +5,7 @@ import httpx
 import re
 from pathlib import Path
 from sqlalchemy.orm import Session
-from .models import EpisodeItem, MediaItem, AppSetting, IndexerConfig, BlacklistedRelease, QualityProfile, CustomFormat
+from .models import EpisodeItem, MediaItem, AppSetting, IndexerConfig, BlacklistedRelease, HistoryEvent, QualityProfile, CustomFormat
 
 def _parse_roots(env_key: str, default_paths: list[str]) -> list[Path]:
     raw = os.getenv(env_key, "")
@@ -62,6 +62,14 @@ DEFAULT_SETTINGS = {
     "movie_folder_format": "{Title} ({Year})",
     "tv_folder_format": "{Title} ({Year})",
     "music_folder_format": "{Title}",
+    "movie_file_format": "{Title} ({Year}) - {Quality}",
+    "episode_file_format": "{Title} - S{Season:02d}E{Episode:02d} - {Quality}",
+    "rename_on_import": "true",
+    "discord_webhook_url": os.getenv("DISCORD_WEBHOOK_URL", ""),
+    "gotify_url": os.getenv("GOTIFY_URL", ""),
+    "gotify_token": os.getenv("GOTIFY_TOKEN", ""),
+    "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN", ""),
+    "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID", ""),
     "default_movie_quality": "1080p",
     "default_tv_quality": "1080p",
     "default_music_quality": "lossless",
@@ -188,7 +196,7 @@ async def search_prowlarr(query: str, media_type: str, quality: str, db: Session
         params.setdefault("categories", []).append(c)
 
     headers = {"X-Api-Key": cfg["prowlarr_api_key"]}
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(verify=False, timeout=20.0) as client:
         resp = await client.get(f"{cfg['prowlarr_url'].rstrip('/')}/api/v1/search", params=params, headers=headers)
         resp.raise_for_status()
         results = resp.json()
@@ -243,10 +251,98 @@ async def search_prowlarr(query: str, media_type: str, quality: str, db: Session
     scored_releases.sort(key=lambda x: x.get("_omni_score", 0), reverse=True)
     return scored_releases
 
-async def sync_posters_from_plex(db: Session) -> int:
+
+def _find_local_poster_file(file_path: str | None) -> Path | None:
+    if not file_path:
+        return None
+    p = Path(file_path)
+    if not p.exists():
+        m_drv = re.match(r"^([a-zA-Z]):[\\/](.*)$", file_path)
+        if m_drv:
+            drv = m_drv.group(1).lower()
+            rest = m_drv.group(2).replace(chr(92), "/")
+            for base in (f"/mnt/plex_{drv}", f"/mnt/{drv}"):
+                cand = Path(base) / rest
+                if cand.exists():
+                    p = cand
+                    break
+    folder = p if p.is_dir() else p.parent
+    if not folder.exists():
+        return None
+    for name in ("poster.jpg", "poster.png", "folder.jpg", "folder.png", "cover.jpg", "show.jpg"):
+        art = folder / name
+        if art.is_file():
+            return art
+    return None
+
+async def _search_plex_poster(title: str, year: int | None, cfg: dict, client: httpx.AsyncClient) -> str:
+    plex_url = (cfg.get("plex_url") or "").split("/web")[0].strip().rstrip("/")
+    plex_tok = (cfg.get("plex_token") or "").strip()
+    if not plex_url or not plex_tok:
+        return ""
+    words = [w for w in title.strip().split() if w]
+    queries = [title]
+    if len(words) >= 3:
+        queries.append(" ".join(words[:3]))
+    if len(words) >= 2:
+        queries.append(" ".join(words[:2]))
+    seen_q = set()
+    for q in queries:
+        ql = q.lower()
+        if ql in seen_q:
+            continue
+        seen_q.add(ql)
+        try:
+            r = await client.get(
+                f"{plex_url}/hubs/search",
+                params={"query": q, "limit": 12},
+                headers={"X-Plex-Token": plex_tok, "Accept": "application/json"},
+            )
+            if r.status_code == 200:
+                hubs = (r.json().get("MediaContainer") or {}).get("Hub") or []
+                for hub in hubs:
+                    for meta in (hub.get("Metadata") or []):
+                        if meta.get("type") not in ("movie", "show", "collection", None):
+                            continue
+                        m_yr = meta.get("year")
+                        if year and m_yr and abs(int(m_yr) - int(year)) > 1:
+                            continue
+                        thumb = meta.get("thumb")
+                        if thumb:
+                            return f"{plex_url}{thumb}?X-Plex-Token={plex_tok}"
+        except Exception:
+            pass
+    return ""
+
+async def _fetch_public_poster(title: str, year: int | None, media_type: str, client: httpx.AsyncClient) -> str:
+    """Fetches official poster artwork from TVMaze (TV) or iTunes (Movies) with zero API keys required."""
+    try:
+        if media_type == "tv":
+            r = await client.get("https://api.tvmaze.com/singlesearch/shows", params={"q": title})
+            if r.status_code == 200:
+                img = (r.json().get("image") or {})
+                return img.get("original") or img.get("medium") or ""
+        elif media_type == "movie":
+            words = [w for w in title.strip().split() if w]
+            search_terms = [f"{title} {year}" if year else title]
+            if len(words) >= 3:
+                search_terms.append(" ".join(words[:3]))
+            for q in search_terms:
+                r = await client.get("https://itunes.apple.com/search", params={"term": q, "media": "movie", "entity": "movie", "limit": 5})
+                if r.status_code == 200:
+                    results = r.json().get("results") or []
+                    for res in results:
+                        art = res.get("artworkUrl100") or ""
+                        if art:
+                            return art.replace("100x100bb", "600x600bb")
+    except Exception:
+        pass
+    return ""
+
+async def sync_posters_from_plex(db: Session, min_id: int = 0) -> tuple[int, int]:
     """Matches OmniArr library items against Plex metadata to populate poster_url."""
     cfg = get_settings(db)
-    plex_url = cfg.get("plex_url", "").rstrip("/")
+    plex_url = cfg.get("plex_url", "").split("/web")[0].rstrip("/")
     token = cfg.get("plex_token", "")
     if not plex_url or not token:
         return 0
@@ -254,7 +350,7 @@ async def sync_posters_from_plex(db: Session) -> int:
     updated = 0
     headers = {"Accept": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
+        async with httpx.AsyncClient(verify=False, timeout=httpx.Timeout(60.0, connect=5.0)) as client:
             sec_resp = await client.get(f"{plex_url}/library/sections", params={"X-Plex-Token": token}, headers=headers)
             sec_resp.raise_for_status()
             sections = sec_resp.json().get("MediaContainer", {}).get("Directory", [])
@@ -288,7 +384,7 @@ async def sync_posters_from_plex(db: Session) -> int:
                 if not s_url or not s_key:
                     continue
                 try:
-                    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0)) as client:
+                    async with httpx.AsyncClient(verify=False, timeout=httpx.Timeout(30.0, connect=5.0)) as client:
                         resp = await client.get(
                             f"{s_url}/Items",
                             params={"Recursive": "true", "IncludeItemTypes": "Movie,Series", "Fields": "ProviderIds"},
@@ -314,9 +410,20 @@ async def sync_posters_from_plex(db: Session) -> int:
         db.commit()
     except Exception:
         pass
-    return updated
-
-
+    missing_items = db.query(MediaItem).filter(
+        ((MediaItem.poster_url == None) | (MediaItem.poster_url == "")),
+        MediaItem.id > min_id
+    ).order_by(MediaItem.id.asc()).limit(200).all()
+    next_min_id = missing_items[-1].id if missing_items else min_id
+    if missing_items:
+        async with httpx.AsyncClient(verify=False, timeout=8.0) as pub_client:
+            for item in missing_items:
+                art = await _fetch_public_poster(item.title, item.year, item.media_type, pub_client)
+                if art:
+                    item.poster_url = art
+                    updated += 1
+        db.commit()
+    return updated, next_min_id
 async def manual_search_prowlarr(query: str, media_type: str, quality: str, db: Session) -> list[dict]:
     """Returns all Prowlarr releases annotated with score and guardrail status for interactive picking."""
     cfg = get_settings(db)
@@ -326,7 +433,7 @@ async def manual_search_prowlarr(query: str, media_type: str, quality: str, db: 
         params.setdefault("categories", []).append(c)
 
     headers = {"X-Api-Key": cfg["prowlarr_api_key"]}
-    async with httpx.AsyncClient(timeout=45.0) as client:
+    async with httpx.AsyncClient(verify=False, timeout=45.0) as client:
         resp = await client.get(f"{cfg['prowlarr_url'].rstrip('/')}/api/v1/search", params=params, headers=headers)
         resp.raise_for_status()
         results = resp.json()
@@ -375,7 +482,7 @@ async def send_to_qbittorrent(download_url: str, item_id: int, db: Session) -> s
     cfg = get_settings(db)
     qbit_url = cfg["qbit_url"].rstrip("/")
     tag = f"omniarr_{item_id}"
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
         await client.post(
             f"{qbit_url}/api/v2/auth/login",
             data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]}
@@ -396,7 +503,7 @@ async def send_to_qbittorrent(download_url: str, item_id: int, db: Session) -> s
 
 async def trigger_plex_scan(cfg: dict):
     """Notifies Plex, Jellyfin, and/or Emby to refresh libraries after a grab or import."""
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
         if cfg.get("plex_url") and cfg.get("plex_token"):
             try:
                 await client.get(
@@ -446,7 +553,7 @@ async def check_downloads_and_import(db: Session):
 
     cfg = get_settings(db)
     qbit_url = cfg["qbit_url"].rstrip("/")
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
         await client.post(
             f"{qbit_url}/api/v2/auth/login",
             data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]}
@@ -478,7 +585,7 @@ async def check_downloads_and_import(db: Session):
                 reason=reason
             ))
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
                     await client.post(f"{qbit_url}/api/v2/auth/login", data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]})
                     await client.post(f"{qbit_url}/api/v2/torrents/delete", data={"hashes": item.torrent_hash, "deleteFiles": "true"})
             except Exception:
@@ -497,22 +604,24 @@ async def check_downloads_and_import(db: Session):
             target_base = get_best_dest_dir(item.media_type, cfg, db) / clean_name
 
             if content_path.is_file():
-                transfer_file(content_path, target_base / content_path.name, mode)
+                transfer_file(content_path, target_base / build_clean_filename(item, content_path.name, cfg), mode)
             elif content_path.is_dir():
                 for root, _, files in os.walk(content_path):
                     for f in files:
                         if f.lower().endswith((".mkv", ".mp4", ".avi", ".flac", ".mp3", ".m4a")):
                             src_file = Path(root) / f
-                            transfer_file(src_file, target_base / f, mode)
+                            transfer_file(src_file, target_base / build_clean_filename(item, f, cfg), mode)
 
             if cfg.get("remove_completed_download") == "true":
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
                     await client.post(f"{qbit_url}/api/v2/auth/login", data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]})
                     await client.post(f"{qbit_url}/api/v2/torrents/delete", data={"hashes": item.torrent_hash, "deleteFiles": "true"})
 
             item.status = "available"
             item.file_path = str(target_base)
             db.commit()
+            record_history(db, "import", item.title, f"Imported to {target_base}", item.id)
+            await send_notification(f"Imported: {item.title}", f"Saved to `{target_base}`", cfg)
             imported_any = True
 
     if imported_any:
@@ -533,11 +642,11 @@ async def fetch_media_metadata(item: MediaItem, cfg: dict) -> dict:
         "backdrop_url": "",
         "genres": [],
     }
-    plex_url = cfg.get("plex_url", "").rstrip("/")
+    plex_url = cfg.get("plex_url", "").split("/web")[0].rstrip("/")
     token = cfg.get("plex_token", "")
     if plex_url and token:
         try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
+            async with httpx.AsyncClient(verify=False, timeout=8.0) as client:
                 r = await client.get(
                     f"{plex_url}/library/search",
                     params={"query": item.title, "X-Plex-Token": token},
@@ -565,7 +674,7 @@ async def fetch_media_metadata(item: MediaItem, cfg: dict) -> dict:
 
     # Fallback: TVMaze for TV shows, iTunes Search API for movies (no API key required)
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(verify=False, timeout=8.0) as client:
             if item.media_type == "tv":
                 r = await client.get("https://api.tvmaze.com/singlesearch/shows", params={"q": item.title})
                 if r.status_code == 200:
@@ -615,7 +724,7 @@ def move_media_folder(item: MediaItem, new_parent_dir: str, transfer_files: bool
         direct = Path(norm)
         if direct.exists():
             return direct
-        # Translate Windows drive letter (e.g. D:/Plex/Movies/... -> /mnt/plex_d/Plex/Movies/...)
+        # Translate Windows drive letter (e.g. D:/Media/Movies/... -> /mnt/media_d/Media/Movies/...)
         m_drv = re.match(r"^([a-zA-Z]):/(.*)$", norm)
         if m_drv:
             drv = m_drv.group(1).lower()
@@ -672,3 +781,401 @@ def move_media_folder(item: MediaItem, new_parent_dir: str, transfer_files: bool
 
     db.commit()
     return {"ok": True, "new_path": str(new_target), "moved_files": moved_files}
+
+
+async def send_notification(title: str, message: str, cfg: dict):
+    """Dispatches out-of-band notifications to Discord, Gotify, and/or Telegram if configured."""
+    async with httpx.AsyncClient(verify=False, timeout=8.0) as client:
+        discord_url = (cfg.get("discord_webhook_url") or "").strip()
+        if discord_url:
+            try:
+                await client.post(discord_url, json={
+                    "embeds": [{"title": title, "description": message, "color": 6513654}]
+                })
+            except Exception:
+                pass
+        gotify_url = (cfg.get("gotify_url") or "").strip().rstrip("/")
+        gotify_tok = (cfg.get("gotify_token") or "").strip()
+        if gotify_url and gotify_tok:
+            try:
+                await client.post(f"{gotify_url}/message", params={"token": gotify_tok}, json={"title": title, "message": message, "priority": 5})
+            except Exception:
+                pass
+        tg_tok = (cfg.get("telegram_bot_token") or "").strip()
+        tg_chat = (cfg.get("telegram_chat_id") or "").strip()
+        if tg_tok and tg_chat:
+            try:
+                await client.post(f"https://api.telegram.org/bot{tg_tok}/sendMessage", json={"chat_id": tg_chat, "text": f"*{title}*\n{message}", "parse_mode": "Markdown"})
+            except Exception:
+                pass
+
+def record_history(db: Session, event_type: str, title: str, detail: str = "", media_item_id: int | None = None):
+    try:
+        db.add(HistoryEvent(event_type=event_type, title=title, detail=detail, media_item_id=media_item_id))
+        db.commit()
+    except Exception:
+        db.rollback()
+
+def _detect_quality_tag(filename: str) -> str:
+    low = filename.lower()
+    for tag, label in [("2160p", "2160p"), ("4k", "2160p"), ("1080p", "1080p"), ("720p", "720p"), ("480p", "480p"), ("remux", "REMUX"), ("bluray", "BluRay"), ("web-dl", "WEB-DL"), ("webrip", "WEBRip"), ("flac", "FLAC")]:
+        if tag in low:
+            return label
+    return "HD"
+
+def build_clean_filename(item: MediaItem, src_name: str, cfg: dict) -> str:
+    """Formats a clean Plex/Jellyfin filename using configured naming tokens when rename_on_import is enabled."""
+    if cfg.get("rename_on_import", "true") != "true":
+        return src_name
+    ext = Path(src_name).suffix
+    quality = _detect_quality_tag(src_name)
+    year_str = str(item.year or "")
+    if item.media_type == "movie":
+        tpl = cfg.get("movie_file_format", "{Title} ({Year}) - {Quality}")
+        out = tpl.replace("{Title}", item.title).replace("{Year}", year_str).replace("{Quality}", quality).replace("()", "").strip()
+        out = re.sub(r"\s+-\s+$", "", out)
+        return re.sub(r'[\\/*?:"<>|]', "", out) + ext
+    elif item.media_type == "tv":
+        m = re.search(r"[sS](\d{1,2})[eE](\d{1,2})", src_name)
+        if m:
+            s_num, e_num = int(m.group(1)), int(m.group(2))
+            tpl = cfg.get("episode_file_format", "{Title} - S{Season:02d}E{Episode:02d} - {Quality}")
+            out = tpl.replace("{Title}", item.title).replace("{Year}", year_str).replace("{Quality}", quality)
+            out = out.replace("{Season:02d}", f"{s_num:02d}").replace("{Episode:02d}", f"{e_num:02d}")
+            out = out.replace("{Season}", str(s_num)).replace("{Episode}", str(e_num)).replace("()", "").strip()
+            return re.sub(r'[\\/*?:"<>|]', "", out) + ext
+    return src_name
+
+
+def clean_media_title(raw_name: str) -> tuple[str, int | None]:
+    """Converts scene/dot-separated folder names (e.g. 'Troll.1986.1080p.BluRay...') into ('Troll', 1986)."""
+    name = raw_name.strip()
+    # Extract (YYYY) in parens first if present
+    m_paren = re.search(r"\((19\d{2}|20\d{2})\)", name)
+    year = int(m_paren.group(1)) if m_paren else None
+    if m_paren:
+        name = name[:m_paren.start()].strip()
+
+    # Replace dots/underscores with spaces when dots are used as word separators
+    if name.count(".") >= 2:
+        name = name.replace(".", " ")
+    name = name.replace("_", " ")
+
+    # Cut off at standalone 4-digit year if not already extracted
+    if year is None:
+        m_yr = re.search(r"\b(19\d{2}|20\d{2})\b", name)
+        if m_yr and m_yr.start() > 1:
+            year = int(m_yr.group(1))
+            name = name[:m_yr.start()].strip()
+
+    # Cut off at common release/quality tokens
+    cut_tokens = r"\b(2160p|1080p|720p|480p|4k|uhd|hdr|dv|dovi|remux|bluray|blu-ray|bdrip|brrip|web-dl|webdl|webrip|web|hdtv|dvdrip|x264|x265|h264|h265|hevc|av1|10bit|aac|ac3|eac3|dts|truehd|atmos|repack|proper|extended|unrated|directors\.cut)\b"
+    m_tok = re.search(cut_tokens, name, flags=re.IGNORECASE)
+    if m_tok and m_tok.start() > 1:
+        name = name[:m_tok.start()].strip()
+
+    name = re.sub(r"[-\[\(]+$", "", name).strip()
+    name = re.sub(r"\s+", " ", name).strip()
+    # Title-case only if the entire string is lowercase
+    if name == name.lower():
+        name = name.title()
+    return (name or raw_name.strip()), year
+
+def scan_existing_library(db: Session) -> dict:
+    """Scans configured movie_roots and tv_roots on disk and registers untracked folders into OmniArr."""
+    roots_map = get_media_roots(db)
+    existing_paths = {str(i.file_path).rstrip("/").lower() for i in db.query(MediaItem).all() if i.file_path}
+    existing_titles = {(i.title.lower(), i.media_type) for i in db.query(MediaItem).all()}
+    video_exts = (".mkv", ".mp4", ".avi", ".m4v")
+    added = 0
+
+    for mtype in ("movie", "tv"):
+        for root_dir in roots_map.get(mtype, []):
+            rp = Path(root_dir)
+            if not rp.exists() or not rp.is_dir():
+                continue
+            for entry in sorted(rp.iterdir()):
+                if not entry.is_dir() or entry.name.startswith("."):
+                    continue
+                if str(entry).rstrip("/").lower() in existing_paths:
+                    continue
+                # Verify folder actually contains at least one video file
+                has_vid = any(f.lower().endswith(video_exts) for _, _, files in os.walk(entry) for f in files)
+                if not has_vid:
+                    continue
+                title, year = clean_media_title(entry.name.strip())
+                if (title.lower(), mtype) in existing_titles:
+                    continue
+                db.add(MediaItem(
+                    title=title,
+                    year=year,
+                    media_type=mtype,
+                    quality_profile="1080p",
+                    status="available",
+                    file_path=str(entry),
+                    monitored=True,
+                ))
+                existing_titles.add((title.lower(), mtype))
+                added += 1
+
+    if added > 0:
+        db.commit()
+        record_history(db, "scan", f"Library Disk Scan ({added} added)", f"Discovered {added} existing titles on disk")
+    return {"added": added}
+
+
+
+def translate_to_local_path(p: str, cfg: dict | None = None) -> str:
+    if not p:
+        return ""
+    if cfg is None:
+        db = SessionLocal()
+        try:
+            cfg = get_settings(db)
+        finally:
+            db.close()
+    return translate_qbit_path(p, cfg)
+
+# === WAVE 2: BULK DRIVE REBALANCER & TV SEASON/EPISODE MANAGER ===
+
+def get_drive_storage_stats(db: Session) -> list[dict]:
+    roots = db.query(RootFolder).all()
+    seen_mounts: dict[str, dict] = {}
+    for rf in roots:
+        linux_p = translate_to_local_path(rf.path)
+        check_p = linux_p
+        while check_p and check_p != "/" and not os.path.exists(check_p):
+            check_p = os.path.dirname(check_p)
+        if not check_p or not os.path.exists(check_p):
+            continue
+        st = os.statvfs(check_p)
+        total_gb = round((st.f_blocks * st.f_frsize) / (1024 ** 3), 1)
+        free_gb = round((st.f_bavail * st.f_frsize) / (1024 ** 3), 1)
+        used_gb = round(total_gb - free_gb, 1)
+        pct = round((used_gb / total_gb) * 100, 1) if total_gb > 0 else 0.0
+        mount_key = f"{st.f_fsid}_{total_gb}"
+        if mount_key not in seen_mounts:
+            seen_mounts[mount_key] = {
+                "id": rf.id,
+                "label": rf.path,
+                "local_path": linux_p,
+                "media_type": rf.media_type,
+                "total_gb": total_gb,
+                "used_gb": used_gb,
+                "free_gb": free_gb,
+                "used_pct": pct,
+                "item_count": 0,
+            }
+    # Count library items per root prefix
+    items = db.query(MediaItem).filter(MediaItem.file_path != None).all()
+    for it in items:
+        lp = translate_to_local_path(it.file_path or "")
+        for info in seen_mounts.values():
+            base_dir = os.path.dirname(info["local_path"].rstrip("/")) or info["local_path"]
+            if lp.startswith(info["local_path"].rstrip("/") + "/") or lp.startswith(base_dir + "/"):
+                info["item_count"] += 1
+                break
+    return sorted(seen_mounts.values(), key=lambda x: x["free_gb"], reverse=True)
+
+
+def move_media_item_folder(db: Session, item_id: int, target_root: str) -> tuple[bool, str]:
+    item = db.query(MediaItem).filter(MediaItem.id == item_id).first()
+    if not item or not item.file_path:
+        return False, "Item has no local file path"
+    src_local = translate_to_local_path(item.file_path)
+    dst_root_local = translate_to_local_path(target_root).rstrip("/")
+    if not os.path.exists(src_local):
+        return False, f"Source not found on disk: {src_local}"
+    os.makedirs(dst_root_local, exist_ok=True)
+    folder_name = os.path.basename(src_local.rstrip("/"))
+    dst_local = os.path.join(dst_root_local, folder_name)
+    if os.path.abspath(src_local) == os.path.abspath(dst_local):
+        return True, "Already on target drive"
+    if os.path.exists(dst_local):
+        return False, f"Destination already exists: {dst_local}"
+    shutil.move(src_local, dst_local)
+    item.file_path = dst_local
+    db.add(HistoryLog(
+        event_type="BulkRelocate",
+        title=item.title,
+        details=f"Moved {folder_name} -> {dst_root_local}",
+    ))
+    db.commit()
+    return True, dst_local
+
+
+async def get_tv_seasons_and_episodes(item: MediaItem) -> list[dict]:
+    # 1. Scan disk for SxxExx video files
+    video_exts = {".mkv", ".mp4", ".avi", ".m4v", ".ts", ".mov", ".wmv"}
+    disk_eps: dict[tuple[int, int], dict] = {}
+    local_dir = translate_to_local_path(item.file_path or "")
+    if local_dir and os.path.isdir(local_dir):
+        for root, _, files in os.walk(local_dir):
+            for fn in files:
+                ext = os.path.splitext(fn)[1].lower()
+                if ext not in video_exts:
+                    continue
+                m = re.search(r"[Ss](\d{1,2})[Ee](\d{1,3})", fn)
+                if m:
+                    s_num, e_num = int(m.group(1)), int(m.group(2))
+                    full_p = os.path.join(root, fn)
+                    size_mb = round(os.path.getsize(full_p) / (1024 * 1024), 1)
+                    qual = "2160p" if "2160" in fn or "4k" in fn.lower() else ("1080p" if "1080" in fn else ("720p" if "720" in fn else "SD/WEB"))
+                    disk_eps[(s_num, e_num)] = {
+                        "file": fn,
+                        "size_mb": size_mb,
+                        "quality": qual,
+                    }
+
+    # 2. Fetch episode guide from TVMaze (no API key needed)
+    seasons_map: dict[int, list[dict]] = {}
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.get("https://api.tvmaze.com/singlesearch/shows", params={"q": item.title, "embed": "episodes"})
+            if r.status_code == 200:
+                data = r.json()
+                eps = ((data.get("_embedded") or {}).get("episodes")) or []
+                for ep in eps:
+                    s_num = int(ep.get("season") or 0)
+                    e_num = int(ep.get("number") or 0)
+                    if s_num <= 0 or e_num <= 0:
+                        continue
+                    disk_info = disk_eps.pop((s_num, e_num), None)
+                    seasons_map.setdefault(s_num, []).append({
+                        "season": s_num,
+                        "episode": e_num,
+                        "code": f"S{s_num:02d}E{e_num:02d}",
+                        "name": ep.get("name") or f"Episode {e_num}",
+                        "airdate": ep.get("airdate") or "",
+                        "on_disk": disk_info is not None,
+                        "file": disk_info["file"] if disk_info else "",
+                        "size_mb": disk_info["size_mb"] if disk_info else 0,
+                        "quality": disk_info["quality"] if disk_info else "",
+                    })
+    except Exception:
+        pass
+
+    # 3. Merge any extra on-disk episodes not in TVMaze response
+    for (s_num, e_num), disk_info in sorted(disk_eps.items()):
+        seasons_map.setdefault(s_num, []).append({
+            "season": s_num,
+            "episode": e_num,
+            "code": f"S{s_num:02d}E{e_num:02d}",
+            "name": disk_info["file"],
+            "airdate": "",
+            "on_disk": True,
+            "file": disk_info["file"],
+            "size_mb": disk_info["size_mb"],
+            "quality": disk_info["quality"],
+        })
+
+    result = []
+    for s_num in sorted(seasons_map.keys(), reverse=True):
+        ep_list = sorted(seasons_map[s_num], key=lambda x: x["episode"])
+        have_count = sum(1 for e in ep_list if e["on_disk"])
+        result.append({
+            "season": s_num,
+            "total": len(ep_list),
+            "on_disk": have_count,
+            "episodes": ep_list,
+        })
+    return result
+
+
+# === WAVE 3: FULL POSTER REMATCH, PER-ITEM POSTER PICKER & KOMETA ASSETS ===
+
+def _find_kometa_asset_file(title: str, year: int | None, kometa_dir: str) -> str:
+    base = translate_to_local_path((kometa_dir or "").strip())
+    if not base or not os.path.isdir(base):
+        return ""
+    clean_t = re.sub(r'[\\/:*?"<>|]', "", title or "").strip()
+    candidates = []
+    if year:
+        candidates.extend([
+            os.path.join(base, f"{clean_t} ({year})", "poster.jpg"),
+            os.path.join(base, f"{clean_t} ({year})", "poster.png"),
+            os.path.join(base, f"{clean_t} ({year}).jpg"),
+            os.path.join(base, f"{clean_t} ({year}).png"),
+        ])
+    candidates.extend([
+        os.path.join(base, clean_t, "poster.jpg"),
+        os.path.join(base, clean_t, "poster.png"),
+        os.path.join(base, f"{clean_t}.jpg"),
+        os.path.join(base, f"{clean_t}.png"),
+    ])
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return ""
+
+
+async def get_poster_candidates(db: Session, item: MediaItem) -> list[dict]:
+    cfg = get_settings(db)
+    results: list[dict] = []
+    seen_urls: set[str] = set()
+
+    def add_cand(source: str, label: str, url: str):
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            results.append({"source": source, "label": label, "url": url})
+
+    # 1. Kometa asset folder
+    kometa_dir = cfg.get("kometa_assets_dir") or ""
+    if _find_kometa_asset_file(item.title, item.year, kometa_dir):
+        add_cand("Kometa", f"Kometa Asset ({item.title})", f"/api/media/{item.id}/kometa-poster")
+
+    # 2. Local media folder poster.jpg / folder.jpg
+    if _find_local_poster_file(item.file_path):
+        add_cand("Disk", "Local Folder Artwork", f"/api/media/{item.id}/local-poster")
+
+    # 3. Plex server hubs (includes Kometa overlays applied inside Plex)
+    plex_url = (cfg.get("plex_url") or "").split("/web")[0].strip().rstrip("/")
+    plex_tok = (cfg.get("plex_token") or "").strip()
+    clean_q = re.sub(r"[^a-zA-Z0-9\s]", " ", item.title or "").strip()
+    words = [w for w in clean_q.split() if w]
+    queries = [clean_q]
+    if len(words) >= 2:
+        queries.append(" ".join(words[:2]))
+
+    async with httpx.AsyncClient(verify=False, timeout=8.0) as client:
+        if plex_url and plex_tok:
+            for q in dict.fromkeys(queries):
+                try:
+                    r = await client.get(
+                        f"{plex_url}/hubs/search",
+                        params={"query": q, "limit": 10},
+                        headers={"X-Plex-Token": plex_tok, "Accept": "application/json"},
+                    )
+                    if r.status_code == 200:
+                        for hub in (r.json().get("MediaContainer") or {}).get("Hub") or []:
+                            for meta in (hub.get("Metadata") or []):
+                                thumb = meta.get("thumb")
+                                if thumb:
+                                    m_title = meta.get("title") or item.title
+                                    m_yr = meta.get("year") or ""
+                                    add_cand("Plex", f"{m_title} ({m_yr})".strip(" ()"), f"{plex_url}{thumb}?X-Plex-Token={plex_tok}")
+                except Exception:
+                    pass
+
+        # 4. iTunes / TVMaze public artwork fallback
+        try:
+            if item.media_type == "tv":
+                r = await client.get("https://api.tvmaze.com/search/shows", params={"q": clean_q})
+                if r.status_code == 200:
+                    for row in (r.json() or [])[:5]:
+                        show = row.get("show") or {}
+                        img = (show.get("image") or {}).get("original") or (show.get("image") or {}).get("medium")
+                        if img:
+                            add_cand("TVMaze", show.get("name") or item.title, img)
+            else:
+                q_term = f"{clean_q} {item.year}" if item.year else clean_q
+                r = await client.get("https://itunes.apple.com/search", params={"term": q_term, "media": "movie", "entity": "movie", "limit": 6})
+                if r.status_code == 200:
+                    for res in (r.json().get("results") or []):
+                        art = (res.get("artworkUrl100") or "").replace("100x100bb", "600x600bb")
+                        if art:
+                            add_cand("iTunes", f"{res.get('trackName', item.title)} ({str(res.get('releaseDate', ''))[:4]})", art)
+        except Exception:
+            pass
+
+    return results

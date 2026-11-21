@@ -1,3 +1,4 @@
+import os, re, shutil
 from fastapi.responses import FileResponse
 import tempfile
 import sqlite3
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Session
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from .database import engine, Base, get_db, SessionLocal
-from .models import MediaItem, EpisodeItem, IndexerConfig, BlacklistedRelease, QualityProfile, CustomFormat
+from .models import MediaItem, EpisodeItem, IndexerConfig, BlacklistedRelease, HistoryEvent, QualityProfile, CustomFormat
 from .services import (
     search_prowlarr, manual_search_prowlarr, send_to_qbittorrent, check_downloads_and_import,
     get_settings, save_settings, get_drive_stats, get_media_roots, sync_posters_from_plex
@@ -72,7 +73,15 @@ from .services import (
     get_settings, save_settings, get_drive_stats, get_media_roots,
     get_best_dest_dir, translate_qbit_path, transfer_file, trigger_plex_scan,
     search_prowlarr, manual_search_prowlarr, send_to_qbittorrent,
-    check_downloads_and_import, sync_posters_from_plex, fetch_media_metadata, move_media_folder
+    check_downloads_and_import, sync_posters_from_plex,
+    get_drive_storage_stats,
+    move_media_item_folder,
+    get_tv_seasons_and_episodes,
+    _find_kometa_asset_file,
+    _find_local_poster_file,
+    _search_plex_poster,
+    _fetch_public_poster,
+    get_poster_candidates, fetch_media_metadata, move_media_folder, scan_existing_library, clean_media_title, _find_local_poster_file, build_clean_filename, record_history, send_notification
 )
 
 app = FastAPI(title="OmniArr", lifespan=lifespan)
@@ -84,6 +93,300 @@ def verify_api_key(x_api_key: str = Header(None), apikey: str = None, db: Sessio
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
 
+
+
+import asyncio as _asyncio
+
+BG_TASKS: dict[str, dict] = {}
+
+def _update_bg_task(key: str, label: str, state: str = "running", detail: str = ""):
+    BG_TASKS[key] = {
+        "key": key,
+        "label": label,
+        "state": state,  # running | done | error
+        "detail": detail,
+    }
+
+@app.get("/api/tasks/status")
+def api_get_bg_tasks():
+    return {"tasks": list(BG_TASKS.values())}
+
+async def _bg_sync_all_posters(rematch_all: bool = False):
+    label = "Poster Rematch" if rematch_all else "Poster Sync"
+    _update_bg_task("posters", label, "running", "Preparing poster sweep...")
+    try:
+        db = SessionLocal()
+        try:
+            if rematch_all:
+                db.query(MediaItem).update({MediaItem.poster_url: None})
+                db.commit()
+            cfg = get_settings(db)
+            kometa_dir = cfg.get("kometa_assets_dir") or ""
+            missing = db.query(MediaItem).filter((MediaItem.poster_url == None) | (MediaItem.poster_url == "")).all()
+            total = len(missing)
+            if total == 0:
+                _update_bg_task("posters", label, "done", "All posters already matched")
+                return
+
+            sem = _asyncio.Semaphore(12)
+            matched = 0
+            checked = 0
+
+            async with httpx.AsyncClient(verify=False, timeout=8.0) as client:
+                async def resolve(item):
+                    nonlocal matched, checked
+                    async with sem:
+                        try:
+                            if _find_kometa_asset_file(item.title, item.year, kometa_dir):
+                                item.poster_url = f"/api/media/{item.id}/kometa-poster"
+                                matched += 1
+                                return
+                            if _find_local_poster_file(item.file_path):
+                                item.poster_url = f"/api/media/{item.id}/local-poster"
+                                matched += 1
+                                return
+                            clean_q = re.sub(r"[^a-zA-Z0-9\s]", " ", item.title or "").strip()
+                            art = await _search_plex_poster(clean_q, item.year, cfg, client)
+                            if not art:
+                                art = await _fetch_public_poster(clean_q, item.year, item.media_type, client)
+                            if art:
+                                item.poster_url = art
+                                matched += 1
+                        finally:
+                            checked += 1
+                            if checked % 50 == 0 or checked == total:
+                                _update_bg_task("posters", label, "running", f"{matched} matched ({checked}/{total} checked)...")
+
+                await _asyncio.gather(*(resolve(it) for it in missing))
+            db.commit()
+            _update_bg_task("posters", label, "done", f"Synced {matched}/{total} posters")
+        finally:
+            db.close()
+    except Exception as e:
+        _update_bg_task("posters", label, "error", str(e)[:80])
+
+
+@app.post("/api/posters/rematch-all")
+async def api_rematch_all_posters():
+    if BG_TASKS.get("posters", {}).get("state") == "running":
+        return {"ok": False, "error": "A poster sync/rematch task is already running."}
+    _asyncio.create_task(_bg_sync_all_posters(rematch_all=True))
+    return {"ok": True}
+
+@app.get("/api/media/{item_id}/kometa-poster")
+def api_serve_kometa_poster(item_id: int, db: Session = Depends(get_db)):
+    item = db.query(MediaItem).filter(MediaItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Not found")
+    cfg = get_settings(db)
+    art_path = _find_kometa_asset_file(item.title, item.year, cfg.get("kometa_assets_dir") or "")
+    if not art_path or not os.path.isfile(art_path):
+        raise HTTPException(status_code=404, detail="Kometa asset not found")
+    return FileResponse(art_path)
+
+@app.get("/api/media/{item_id}/posters")
+async def api_media_poster_candidates(item_id: int, db: Session = Depends(get_db)):
+    item = db.query(MediaItem).filter(MediaItem.id == item_id).first()
+    if not item:
+        return {"candidates": []}
+    cands = await get_poster_candidates(db, item)
+    return {"candidates": cands}
+
+@app.post("/api/media/{item_id}/poster")
+def api_set_media_poster(item_id: int, payload: dict, db: Session = Depends(get_db)):
+    item = db.query(MediaItem).filter(MediaItem.id == item_id).first()
+    if not item:
+        return {"ok": False, "error": "Item not found"}
+    new_url = (payload.get("poster_url") or "").strip()
+    item.poster_url = new_url or None
+    db.add(HistoryLog(event_type="PosterUpdated", title=item.title, details=f"Updated artwork -> {new_url[:80]}"))
+    db.commit()
+    return {"ok": True, "poster_url": item.poster_url}
+
+@app.post("/api/posters/sync-bg")
+async def api_start_bg_poster_sync():
+    if BG_TASKS.get("posters", {}).get("state") == "running":
+        return {"ok": True, "already_running": True}
+    _asyncio.create_task(_bg_sync_all_posters())
+    return {"ok": True}
+
+async def _bg_scan_disk():
+    _update_bg_task("disk_scan", "Disk Scan", "running", "Scanning root folders on disk...")
+    db = SessionLocal()
+    try:
+        res = scan_existing_library(db)
+        added = res.get("added", 0)
+        _update_bg_task("disk_scan", "Disk Scan", "done", f"Added {added} new title(s)")
+        if added > 0:
+            _asyncio.create_task(_bg_sync_all_posters())
+    except Exception as e:
+        _update_bg_task("disk_scan", "Disk Scan", "error", str(e)[:80])
+    finally:
+        db.close()
+
+@app.post("/api/library/scan-disk-bg")
+async def api_start_bg_disk_scan():
+    if BG_TASKS.get("disk_scan", {}).get("state") == "running":
+        return {"ok": True, "already_running": True}
+    _asyncio.create_task(_bg_scan_disk())
+    return {"ok": True}
+
+async def _bg_normalize_titles():
+    _update_bg_task("normalize", "Title Cleanup", "running", "Normalizing raw filenames...")
+    db = SessionLocal()
+    try:
+        items = db.query(MediaItem).all()
+        cleaned = 0
+        for it in items:
+            nt, ny = clean_media_title(it.title)
+            if nt != it.title or (ny and not it.year):
+                it.title = nt
+                if ny and not it.year:
+                    it.year = ny
+                cleaned += 1
+        db.commit()
+        _update_bg_task("normalize", "Title Cleanup", "done", f"Cleaned {cleaned} title(s)")
+        _asyncio.create_task(_bg_sync_all_posters())
+    except Exception as e:
+        _update_bg_task("normalize", "Title Cleanup", "error", str(e)[:80])
+    finally:
+        db.close()
+
+@app.post("/api/library/normalize-titles-bg")
+async def api_start_bg_normalize():
+    if BG_TASKS.get("normalize", {}).get("state") == "running":
+        return {"ok": True, "already_running": True}
+    _asyncio.create_task(_bg_normalize_titles())
+    return {"ok": True}
+
+
+@app.get("/api/storage/drives")
+def api_storage_drives(db: Session = Depends(get_db)):
+    return {"drives": get_drive_storage_stats(db)}
+
+async def _bg_bulk_move(item_ids: list[int], target_root: str):
+    total = len(item_ids)
+    moved = 0
+    errors = 0
+    _update_bg_task("bulk_move", "Drive Move", "running", f"0/{total} moved to {target_root}...")
+    for idx, mid in enumerate(item_ids, start=1):
+        db = SessionLocal()
+        try:
+            ok, msg = await _asyncio.to_thread(move_media_item_folder, db, mid, target_root)
+            if ok:
+                moved += 1
+            else:
+                errors += 1
+        except Exception:
+            errors += 1
+        finally:
+            db.close()
+        _update_bg_task("bulk_move", "Drive Move", "running", f"{moved}/{total} moved ({errors} skipped)...")
+    state = "done" if errors == 0 else "error"
+    _update_bg_task("bulk_move", "Drive Move", state, f"Moved {moved}/{total} to {target_root}")
+
+@app.post("/api/library/bulk-move")
+async def api_bulk_move_items(payload: dict):
+    item_ids = [int(x) for x in (payload.get("item_ids") or [])]
+    target_root = (payload.get("target_root") or "").strip()
+    if not item_ids or not target_root:
+        return {"ok": False, "error": "Select at least one title and a destination drive."}
+    if BG_TASKS.get("bulk_move", {}).get("state") == "running":
+        return {"ok": False, "error": "A bulk drive migration is already running."}
+    _asyncio.create_task(_bg_bulk_move(item_ids, target_root))
+    return {"ok": True, "queued": len(item_ids)}
+
+@app.get("/api/media/{item_id}/seasons")
+async def api_media_seasons(item_id: int, db: Session = Depends(get_db)):
+    item = db.query(MediaItem).filter(MediaItem.id == item_id).first()
+    if not item:
+        return {"seasons": []}
+    seasons = await get_tv_seasons_and_episodes(item)
+    return {"seasons": seasons}
+
+@app.get("/api/history")
+def api_get_history(db: Session = Depends(get_db)):
+    events = db.query(HistoryEvent).order_by(HistoryEvent.id.desc()).limit(100).all()
+    return {
+        "events": [
+            {
+                "id": e.id,
+                "type": e.event_type,
+                "title": e.title,
+                "detail": e.detail,
+                "media_id": e.media_item_id,
+                "date": e.created_at.strftime("%Y-%m-%d %H:%M:%S") if e.created_at else "",
+            }
+            for e in events
+        ]
+    }
+
+@app.get("/api/system/logs")
+def api_get_system_logs(lines: int = 120):
+    import subprocess
+    try:
+        out = subprocess.check_output(["journalctl", "-u", "omniarr", "-n", str(min(lines, 300)), "--no-pager"], text=True, stderr=subprocess.STDOUT)
+        return {"logs": out}
+    except Exception as e:
+        return {"logs": f"Unable to read journalctl logs: {e}"}
+
+
+@app.post("/api/library/normalize-titles")
+async def api_normalize_library_titles(db: Session = Depends(get_db)):
+    items = db.query(MediaItem).all()
+    cleaned = 0
+    for it in items:
+        new_title, new_year = clean_media_title(it.title)
+        if new_title != it.title or (new_year and not it.year):
+            it.title = new_title
+            if new_year and not it.year:
+                it.year = new_year
+            cleaned += 1
+    db.commit()
+    posters, _ = await sync_posters_from_plex(db)
+    return {"ok": True, "cleaned": cleaned, "posters_matched": posters}
+
+
+@app.get("/api/media/{item_id}/local-poster")
+def api_serve_local_poster(item_id: int, db: Session = Depends(get_db)):
+    from fastapi.responses import FileResponse
+    item = db.query(MediaItem).filter_by(id=item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    art = _find_local_poster_file(item.file_path)
+    if not art:
+        raise HTTPException(status_code=404, detail="No local poster found")
+    return FileResponse(str(art))
+
+@app.post("/api/media/{item_id}/edit")
+async def api_edit_media_item(item_id: int, payload: dict, db: Session = Depends(get_db)):
+    item = db.query(MediaItem).filter_by(id=item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    if payload.get("title"):
+        item.title = str(payload["title"]).strip()
+    if "year" in payload:
+        yr = str(payload["year"] or "").strip()
+        item.year = int(yr) if yr.isdigit() else None
+    if payload.get("quality_profile"):
+        item.quality_profile = str(payload["quality_profile"]).strip()
+    db.commit()
+    await sync_posters_from_plex(db)
+    return {"ok": True}
+
+@app.post("/api/library/scan-disk")
+async def api_scan_library_disk(db: Session = Depends(get_db)):
+    res = scan_existing_library(db)
+    if res["added"] > 0:
+        await sync_posters_from_plex(db)
+    return res
+
+@app.post("/api/notifications/test")
+async def api_test_notifications(db: Session = Depends(get_db)):
+    cfg = get_settings(db)
+    await send_notification("OmniArr Test Alert", "Notifications are configured and working properly!", cfg)
+    return {"ok": True}
+
 @app.get("/api/activity")
 async def api_get_activity(db: Session = Depends(get_db)):
     cfg = get_settings(db)
@@ -91,7 +394,7 @@ async def api_get_activity(db: Session = Depends(get_db)):
     q_hdr = {"Referer": qbit_url, "Origin": qbit_url}
     items_by_hash = {i.torrent_hash: i for i in db.query(MediaItem).filter(MediaItem.torrent_hash != None).all()}
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
             await client.post(f"{qbit_url}/api/v2/auth/login", data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]}, headers=q_hdr)
             resp = await client.get(f"{qbit_url}/api/v2/torrents/info", params={"category": cfg["qbit_category"]}, headers=q_hdr)
             raw_list = resp.json() if resp.status_code == 200 else []
@@ -137,7 +440,7 @@ async def _do_force_import_torrent(payload: dict, db: Session):
     qbit_url = cfg["qbit_url"].rstrip("/")
     q_hdr = {"Referer": qbit_url, "Origin": qbit_url}
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
         await client.post(f"{qbit_url}/api/v2/auth/login", data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]}, headers=q_hdr)
         resp = await client.get(f"{qbit_url}/api/v2/torrents/info", params={"hashes": thash} if thash else {"category": cfg["qbit_category"]}, headers=q_hdr)
         torrents = resp.json() if resp.status_code == 200 else []
@@ -170,13 +473,13 @@ async def _do_force_import_torrent(payload: dict, db: Session):
 
     imported_files = 0
     if content_path.is_file():
-        transfer_file(content_path, target_base / content_path.name, mode)
+        transfer_file(content_path, target_base / build_clean_filename(item, content_path.name, cfg), mode)
         imported_files = 1
     elif content_path.is_dir():
         for root, _, files in os.walk(content_path):
             for f in files:
                 if f.lower().endswith((".mkv", ".mp4", ".avi", ".m4v", ".flac", ".mp3", ".m4a")) and "sample" not in f.lower():
-                    transfer_file(Path(root) / f, target_base / f, mode)
+                    transfer_file(Path(root) / f, target_base / build_clean_filename(item, f, cfg), mode)
                     imported_files += 1
 
     if imported_files == 0:
@@ -200,7 +503,7 @@ async def api_blacklist_torrent(payload: dict, db: Session = Depends(get_db)):
     q_hdr = {"Referer": qbit_url, "Origin": qbit_url}
     if thash:
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
                 await client.post(f"{qbit_url}/api/v2/auth/login", data={"username": cfg["qbit_user"], "password": cfg["qbit_pass"]}, headers=q_hdr)
                 await client.post(f"{qbit_url}/api/v2/torrents/delete", data={"hashes": thash, "deleteFiles": "true"}, headers=q_hdr)
         except Exception:
@@ -282,7 +585,7 @@ async def service_health(force: bool = False, db: Session = Depends(get_db)):
         "media": {"ok": False, "configured": bool(cfg.get("plex_token") or cfg.get("jellyfin_api_key") or cfg.get("emby_api_key")), "label": "Media"}
     }
     try:
-        async with httpx.AsyncClient(timeout=4.0) as client:
+        async with httpx.AsyncClient(verify=False, timeout=4.0) as client:
             if status["prowlarr"]["configured"]:
                 try:
                     r = await client.get(f"{cfg['prowlarr_url'].rstrip('/')}/api/v1/system/status", headers={"X-Api-Key": cfg["prowlarr_api_key"]})
@@ -367,14 +670,50 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
     total_tv = tv_q.count()
     total_items = total_movies + total_tv
 
-    max_count = max(total_movies, total_tv, 1)
-    total_pages = max(1, (max_count + per_page - 1) // per_page)
+    is_overview = (tab == "library" and not search_q and media_type not in ("movie", "tv"))
+
+    # Latest 10 added movies
+    recent_movies = (
+        db.query(MediaItem)
+        .filter(MediaItem.media_type == "movie")
+        .order_by(MediaItem.added_at.desc(), MediaItem.id.desc())
+        .limit(10)
+        .all()
+    )
+
+    # Latest 10 updated TV shows (ordered by latest EpisodeItem id/air activity, falling back to MediaItem.added_at/id)
+    latest_ep_subq = (
+        db.query(EpisodeItem.media_item_id, func.max(EpisodeItem.id).label("max_ep_id"))
+        .group_by(EpisodeItem.media_item_id)
+        .subquery()
+    )
+    recent_tv = (
+        db.query(MediaItem)
+        .outerjoin(latest_ep_subq, MediaItem.id == latest_ep_subq.c.media_item_id)
+        .filter(MediaItem.media_type == "tv")
+        .order_by(func.coalesce(latest_ep_subq.c.max_ep_id, 0).desc(), MediaItem.added_at.desc(), MediaItem.id.desc())
+        .limit(10)
+        .all()
+    )
+
+    if media_type == "movie":
+        active_q = movie_q
+        active_total = total_movies
+    elif media_type == "tv":
+        active_q = tv_q
+        active_total = total_tv
+    else:
+        active_q = base_q
+        active_total = total_items
+
+    total_pages = max(1, (max(active_total, 1) + per_page - 1) // per_page)
     page = max(1, min(page, total_pages))
     offset = (page - 1) * per_page
 
-    movie_slice = movie_q.order_by(order_col).offset(offset).limit(per_page).all()
-    tv_slice = tv_q.order_by(order_col).offset(offset).limit(per_page).all()
-    items = movie_slice + tv_slice
+    if is_overview:
+        items = recent_movies + recent_tv
+    else:
+        items = active_q.order_by(order_col).offset(offset).limit(per_page).all()
     episode_counts = dict(
         db.query(EpisodeItem.media_item_id, func.count(EpisodeItem.id))
         .group_by(EpisodeItem.media_item_id)
@@ -408,7 +747,11 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
         "custom_formats": custom_formats,
         "drives": drives,
         "root_folders": root_folders,
-        "active_tab": tab,
+        "active_tab": ("settings" if tab in ("media", "profiles", "indexers", "clients", "connect", "settings") else tab),
+        "settings_section": (tab if tab in ("media", "profiles", "indexers", "clients", "connect") else request.query_params.get("section", "media")),
+        "is_overview": is_overview,
+        "recent_movies": recent_movies,
+        "recent_tv": recent_tv,
         "sort": sort,
         "q": search_q,
         "media_type": media_type,
@@ -475,6 +818,7 @@ async def api_move_media_folder(item_id: int, payload: dict, db: Session = Depen
     transfer_files = bool(payload.get("transfer_files", True))
     try:
         res = move_media_folder(item, new_root, transfer_files, db)
+        record_history(db, "move", item.title, f"Moved to {res['new_path']} ({res['moved_files']} files)", item.id)
         cfg = get_settings(db)
         if cfg.get("plex_notify_import", "true") == "true":
             await trigger_plex_scan(cfg)
@@ -594,6 +938,70 @@ async def update_settings(request: Request, db: Session = Depends(get_db)):
     save_settings(db, updates)
     return RedirectResponse(url=f"/?tab={section}&msg=Settings+saved", status_code=303)
 
+
+@app.post("/api/settings/roots/add-batch")
+async def api_add_roots_batch(payload: dict, db: Session = Depends(get_db)):
+    media_type = (payload.get("media_type") or "movie").strip().lower()
+    paths = [p.strip() for p in (payload.get("paths") or []) if p and p.strip()]
+    create_dir = bool(payload.get("create_dir", True))
+    if not paths:
+        raise HTTPException(status_code=400, detail="No folder paths provided")
+    roots_map = get_media_roots(db)
+    existing = [str(p) for p in roots_map.get(media_type, []) if str(p)]
+    added = 0
+    for p in paths:
+        if create_dir:
+            try:
+                Path(p).mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+        if p not in existing:
+            existing.append(p)
+            added += 1
+    key = f"{media_type}_roots"
+    save_settings(db, {key: ",".join(existing)})
+    return {"ok": True, "added": added}
+
+
+@app.get("/api/filesystem/all-drives")
+def browse_all_drives_folders():
+    """Walks up to 4 levels deep across all mounted drives to find nested root folders without listing individual movie/show folders."""
+    info = browse_filesystem("")
+    all_dirs = []
+    seen = set()
+    skip_names = {"lost+found", "$recycle.bin", "system volume information", "windows", "program files", "program files (x86)", "programdata", "users", "perflogs", "downloads", "incomplete"}
+    video_exts = (".mkv", ".mp4", ".avi", ".m4v")
+
+    def _walk_roots(base_mp: Path, free_gb: float, cur: Path, depth: int):
+        if depth > 4:
+            return
+        try:
+            children = [c for c in sorted(cur.iterdir(), key=lambda x: x.name.lower())
+                        if c.is_dir() and not c.name.startswith(".") and c.name.lower() not in skip_names]
+        except PermissionError:
+            return
+        for c in children:
+            # Skip leaf title folders that directly hold video files
+            try:
+                has_direct_video = any(f.is_file() and f.suffix.lower() in video_exts for f in c.iterdir())
+            except PermissionError:
+                has_direct_video = False
+            if has_direct_video:
+                continue
+            p_str = str(c)
+            if p_str not in seen:
+                seen.add(p_str)
+                rel_name = str(c.relative_to(base_mp))
+                all_dirs.append({"mount": str(base_mp), "free_gb": free_gb, "name": rel_name, "path": p_str, "depth": depth})
+            _walk_roots(base_mp, free_gb, c, depth + 1)
+
+    for mt in info.get("mounts", []):
+        mp = Path(mt["path"])
+        if str(mp) in ("/", "/boot", "/tmp", "/var", "/opt", "/home", "/root", "/srv", "/mnt"):
+            continue
+        _walk_roots(mp, mt.get("free_gb", 0), mp, 1)
+    return {"directories": all_dirs}
+
 @app.get("/api/filesystem")
 def browse_filesystem(path: str = ""):
     """Lists mounted drives from /proc/mounts and subdirectories for a Sonarr/Radarr-style folder picker."""
@@ -699,7 +1107,7 @@ async def update_indexers(request: Request, db: Session = Depends(get_db)):
 async def test_connection(service: str, db: Session = Depends(get_db)):
     cfg = get_settings(db)
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(verify=False, timeout=8.0) as client:
             if service == "prowlarr":
                 r = await client.get(f"{cfg['prowlarr_url'].rstrip('/')}/api/v1/system/status", headers={"X-Api-Key": cfg["prowlarr_api_key"]})
                 r.raise_for_status()
