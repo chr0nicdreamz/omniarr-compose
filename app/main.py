@@ -11,6 +11,7 @@ import httpx
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Request, Form, HTTPException, Header, UploadFile, File, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -101,6 +102,7 @@ from .services import (
 )
 
 app = FastAPI(title="OmniArr", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 def verify_api_key(x_api_key: str = Header(None), apikey: str = None, db: Session = Depends(get_db)):
     cfg = get_settings(db)
