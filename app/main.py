@@ -1500,6 +1500,50 @@ async def seerr_command(payload: dict, background_tasks: BackgroundTasks, db: Se
         "body": payload,
     }
 
+<<<<<<< HEAD
+=======
+@app.get("/api/v3/queue", dependencies=[Depends(verify_api_key)])
+def seerr_get_queue(includeEpisode: bool = False, db: Session = Depends(get_db)):
+    downloading = db.query(MediaItem).filter(MediaItem.status == "downloading").all()
+    records = [
+        {
+            "id": item.id,
+            "movieId": item.id if item.media_type == "movie" else None,
+            "seriesId": item.id if item.media_type == "tv" else None,
+            "title": item.title,
+            "status": "downloading",
+            "trackedDownloadState": "downloading",
+            "trackedDownloadStatus": "ok",
+            "protocol": "torrent",
+            "downloadClient": "qBittorrent",
+            "timeleft": None,
+            "estimatedCompletionTime": None,
+        }
+        for item in downloading
+    ]
+    return {
+        "page": 1,
+        "pageSize": max(len(records), 10),
+        "sortKey": "timeleft",
+        "sortDirection": "ascending",
+        "totalRecords": len(records),
+        "records": records,
+    }
+
+@app.get("/api/v3/queue/status", dependencies=[Depends(verify_api_key)])
+def seerr_get_queue_status(db: Session = Depends(get_db)):
+    count = db.query(MediaItem).filter(MediaItem.status == "downloading").count()
+    return {
+        "totalCount": count,
+        "count": count,
+        "unknownCount": 0,
+        "downCount": count,
+        "unknownUnavailableCount": 0,
+        "downloadClientUnavailableCount": 0,
+        "failedPendingCount": 0,
+    }
+
+>>>>>>> main
 
 # === ONE-STOP HUB API ROUTES: TAUTULLI, LIBRARY HEALTH AUDITOR & COLLECTIONS ===
 @app.get("/api/tautulli/overview")
