@@ -675,7 +675,7 @@
             <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
                 <div>
                     <h2 class="text-lg font-bold text-indigo-300">⚙️ Settings &amp; Configuration</h2>
-                    <p class="text-xs text-slate-400">Manage storage drives, quality profiles, indexers, download clients, Plex/Kometa integration, and *Arr migrations.</p>
+                    <p class="text-xs text-slate-400">Manage storage drives, quality profiles, indexers, download clients, Plex/metadata connections, and *Arr migrations.</p>
                 </div>
             </div>
             <div class="flex flex-wrap gap-1.5 border-t border-slate-800 pt-3 text-xs font-medium">
@@ -684,7 +684,7 @@
                     ('profiles', '🎚️ Profiles & Custom Formats'),
                     ('indexers', '🔎 Indexers (' ~ indexers|length ~ ')'),
                     ('clients', '⬇️ Download Clients'),
-                    ('connect', '🔌 Connect, Kometa & Backup')
+                    ('connect', '🔌 Connect & Backup')
                 ] %}
                 {% for skey, slabel in sec_tabs %}
                 <a href="/?tab=settings&section={{ skey }}"
@@ -1610,7 +1610,7 @@
         loadDriveStats();
 
         async function triggerRematchAllPosters() {
-            if (!confirm('Clear all cached posters and rematch the entire library from Plex, Kometa assets, and metadata APIs?')) return;
+            if (!confirm('Clear all cached posters and rematch the entire library from Plex, local assets, and metadata APIs?')) return;
             const res = await fetch('/api/posters/rematch-all', {method: 'POST'});
             const data = await res.json();
             if (!data.ok) {

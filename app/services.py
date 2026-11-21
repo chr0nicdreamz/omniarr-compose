@@ -1245,7 +1245,7 @@ async def get_poster_candidates(db: Session, item: MediaItem) -> list[dict]:
     # 1. Kometa asset folder
     kometa_dir = cfg.get("kometa_assets_dir") or ""
     if _find_kometa_asset_file(item.title, item.year, kometa_dir):
-        add_cand("Kometa", f"Kometa Asset ({item.title})", f"/api/media/{item.id}/kometa-poster")
+        add_cand("Local Art", f"Overlay / Asset ({item.title})", f"/api/media/{item.id}/kometa-poster")
 
     # 2. Local media folder poster.jpg / folder.jpg
     if _find_local_poster_file(item.file_path):

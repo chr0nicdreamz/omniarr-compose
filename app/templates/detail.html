@@ -461,7 +461,7 @@
             <div class="flex items-center justify-between mb-4">
                 <div>
                     <h3 class="text-base font-bold text-indigo-300">🎨 Choose Poster for {{ item.title }}</h3>
-                    <p class="text-xs text-slate-400">Select from Plex (including Kometa overlays), local disk art, public metadata, or paste a custom image URL</p>
+                    <p class="text-xs text-slate-400">Select from Plex, local disk art, public metadata, or paste a custom image URL</p>
                 </div>
                 <button type="button" onclick="closePosterPicker()" class="text-slate-400 hover:text-white text-sm px-2">✕</button>
             </div>
@@ -470,7 +470,7 @@
                 <button type="button" onclick="applyCustomPosterUrl()" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg text-xs font-semibold text-white">Save URL</button>
             </div>
             <div id="poster-candidates-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 overflow-y-auto pr-1 text-xs">
-                <div class="text-slate-400 col-span-full py-6 text-center">Searching Plex, Kometa & metadata sources...</div>
+                <div class="text-slate-400 col-span-full py-6 text-center">Searching Plex & metadata sources...</div>
             </div>
         </div>
     </div>
@@ -495,7 +495,7 @@
             const modal = document.getElementById('poster-picker-modal');
             const grid = document.getElementById('poster-candidates-grid');
             modal.classList.remove('hidden');
-            grid.innerHTML = '<div class="text-slate-400 col-span-full py-6 text-center">Searching Plex, Kometa & metadata sources...</div>';
+            grid.innerHTML = '<div class="text-slate-400 col-span-full py-6 text-center">Searching Plex & metadata sources...</div>';
             try {
                 const res = await fetch('/api/media/{{ item.id }}/posters');
                 const data = await res.json();
