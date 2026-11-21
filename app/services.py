@@ -1585,12 +1585,27 @@ async def fetch_tautulli_watch_stats(cfg: dict, items: list) -> dict:
     url = (cfg.get("tautulli_url") or "").rstrip("/")
     key = (cfg.get("tautulli_api_key") or "").strip()
     if not url or not key:
-        return {"configured": False, "stale_items": [], "recent_watches": []}
+        return {
+            "configured": False,
+            "stale_items": [],
+            "recent_watches": [],
+            "top_movies": [],
+            "top_tv": [],
+            "top_users": [],
+        }
     try:
         async with httpx.AsyncClient(verify=False, timeout=12.0) as client:
             r = await client.get(f"{url}/api/v2", params={"apikey": key, "cmd": "get_history", "length": 1500})
             if r.status_code != 200:
-                return {"configured": True, "error": f"HTTP {r.status_code}", "stale_items": [], "recent_watches": []}
+                return {
+                    "configured": True,
+                    "error": f"HTTP {r.status_code}",
+                    "stale_items": [],
+                    "recent_watches": [],
+                    "top_movies": [],
+                    "top_tv": [],
+                    "top_users": [],
+                }
             rows = ((r.json().get("response") or {}).get("data") or {}).get("data") or []
             last_played = {}
             play_counts = {}
@@ -1603,13 +1618,48 @@ async def fetch_tautulli_watch_stats(cfg: dict, items: list) -> dict:
                     play_counts[t_norm] = play_counts.get(t_norm, 0) + 1
                     if ts > last_played.get(t_norm, 0):
                         last_played[t_norm] = ts
-                if len(recent_watches) < 15:
+                if len(recent_watches) < 25:
                     recent_watches.append({
                         "title": row.get("full_title") or t_raw,
                         "user": row.get("friendly_name") or row.get("user") or "User",
+                        "player": row.get("player") or "",
                         "date": datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "",
                         "percent_complete": row.get("percent_complete") or 0,
                     })
+
+            # Fetch Tautulli Home Stats (Top Movies, Top TV Shows, Top Users)
+            top_movies, top_tv, top_users = [], [], []
+            try:
+                r_hs = await client.get(
+                    f"{url}/api/v2",
+                    params={"apikey": key, "cmd": "get_home_stats", "time_range": 30, "stats_count": 8},
+                )
+                if r_hs.status_code == 200:
+                    stat_blocks = (r_hs.json().get("response") or {}).get("data") or []
+                    for blk in stat_blocks:
+                        sid = blk.get("stat_id") or ""
+                        srows = blk.get("rows") or []
+                        if sid == "top_movies":
+                            top_movies = [
+                                {"title": x.get("title") or "", "year": x.get("year") or "", "plays": x.get("total_plays") or 0}
+                                for x in srows[:8]
+                            ]
+                        elif sid == "top_tv":
+                            top_tv = [
+                                {"title": x.get("title") or "", "plays": x.get("total_plays") or 0}
+                                for x in srows[:8]
+                            ]
+                        elif sid == "top_users":
+                            top_users = [
+                                {
+                                    "user": x.get("friendly_name") or x.get("user") or "User",
+                                    "plays": x.get("total_plays") or 0,
+                                    "duration_hrs": round(float(x.get("total_duration") or 0) / 3600.0, 1),
+                                }
+                                for x in srows[:8]
+                            ]
+            except Exception:
+                pass
 
             cutoff_ts = int((datetime.utcnow() - timedelta(days=365)).timestamp())
             stale_items = []
@@ -1628,10 +1678,24 @@ async def fetch_tautulli_watch_stats(cfg: dict, items: list) -> dict:
                         "last_watched": datetime.fromtimestamp(lp).strftime("%Y-%m-%d") if lp else "Never watched",
                         "file_path": it.file_path or "",
                     })
-            return {"configured": True, "stale_items": stale_items[:100], "recent_watches": recent_watches}
+            return {
+                "configured": True,
+                "stale_items": stale_items[:120],
+                "recent_watches": recent_watches,
+                "top_movies": top_movies,
+                "top_tv": top_tv,
+                "top_users": top_users,
+            }
     except Exception as e:
-        return {"configured": True, "error": str(e), "stale_items": [], "recent_watches": []}
-
+        return {
+            "configured": True,
+            "error": str(e),
+            "stale_items": [],
+            "recent_watches": [],
+            "top_movies": [],
+            "top_tv": [],
+            "top_users": [],
+        }
 
 def _probe_video_file(fpath: Path) -> dict:
     info = {"codec": "unknown", "resolution": "unknown", "audio": "unknown", "size_gb": 0.0}
