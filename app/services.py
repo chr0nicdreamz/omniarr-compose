@@ -1011,10 +1011,12 @@ def clean_media_title(raw_name: str) -> tuple[str, int | None]:
 def scan_existing_library(db: Session) -> dict:
     """Scans configured movie_roots and tv_roots on disk and registers untracked folders into OmniArr."""
     roots_map = get_media_roots(db)
-    existing_paths = {str(i.file_path).rstrip("/").lower() for i in db.query(MediaItem).all() if i.file_path}
-    existing_titles = {(i.title.lower(), i.media_type) for i in db.query(MediaItem).all()}
+    all_items = db.query(MediaItem).all()
+    existing_paths = {str(i.file_path).rstrip("/").lower() for i in all_items if i.file_path}
+    existing_by_key = {(i.title.lower(), i.media_type): i for i in all_items}
     video_exts = (".mkv", ".mp4", ".avi", ".m4v")
     added = 0
+    updated = 0
 
     for mtype in ("movie", "tv"):
         for root_dir in roots_map.get(mtype, []):
@@ -1031,9 +1033,16 @@ def scan_existing_library(db: Session) -> dict:
                 if not has_vid:
                     continue
                 title, year = clean_media_title(entry.name.strip())
-                if (title.lower(), mtype) in existing_titles:
+                existing_item = existing_by_key.get((title.lower(), mtype))
+                if existing_item is not None:
+                    old_p = Path(existing_item.file_path) if existing_item.file_path else None
+                    if not old_p or not old_p.exists():
+                        existing_item.file_path = str(entry)
+                        existing_item.status = "available"
+                        existing_paths.add(str(entry).rstrip("/").lower())
+                        updated += 1
                     continue
-                db.add(MediaItem(
+                new_item = MediaItem(
                     title=title,
                     year=year,
                     media_type=mtype,
@@ -1041,14 +1050,15 @@ def scan_existing_library(db: Session) -> dict:
                     status="available",
                     file_path=str(entry),
                     monitored=True,
-                ))
-                existing_titles.add((title.lower(), mtype))
+                )
+                db.add(new_item)
+                existing_by_key[(title.lower(), mtype)] = new_item
                 added += 1
 
-    if added > 0:
+    if added > 0 or updated > 0:
         db.commit()
-        record_history(db, "scan", f"Library Disk Scan ({added} added)", f"Discovered {added} existing titles on disk")
-    return {"added": added}
+        record_history(db, "scan", f"Library Disk Scan ({added} added, {updated} relocated)", f"Discovered {added} new titles and updated {updated} relocated paths on disk")
+    return {"added": added, "updated": updated}
 
 
 
