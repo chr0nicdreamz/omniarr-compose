@@ -676,10 +676,11 @@ def _resolve_active_db_path() -> Path:
 @app.get("/api/settings/export")
 def export_settings_json(db: Session = Depends(get_db)):
     import json
+    from datetime import datetime, timezone
     from fastapi.responses import Response
     payload = {
         "version": 1,
-        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "exported_at": datetime.now(timezone.utc).isoformat(),
         "settings": get_settings(db),
     }
     return Response(
