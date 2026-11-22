@@ -390,85 +390,6 @@
             </div>
         </section>
 
-        {% if settings_section == 'backup' %}
-        <div class="space-y-6 max-w-6xl">
-            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl">
-                <h2 class="text-lg font-semibold text-indigo-300 mb-1">💾 Database &amp; Settings Backups</h2>
-                <p class="text-xs text-slate-400 mb-4">Download a consistent snapshot of your SQLite database or export your saved settings as JSON.</p>
-                <div class="flex flex-wrap items-center gap-3">
-                    <a href="/api/settings/backup"
-                       class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-2 rounded-lg text-xs font-medium">
-                        💾 Download Database Backup (.db)
-                    </a>
-                    <a href="/api/settings/export"
-                       class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-2 rounded-lg text-xs font-medium">
-                        📤 Export Settings (.json)
-                    </a>
-                </div>
-            </div>
-        <div class=\"bg-slate-900 border border-slate-800 p-5 rounded-xl\"">
-            <h3 class="text-base font-bold text-indigo-300 mb-1">📦 Migrate from *Arr Backup</h3>
-            <p class="text-xs text-slate-400 mb-3">Import existing libraries, quality profiles, and indexers from a Sonarr, Radarr, Lidarr, or Prowlarr <code class="text-slate-200">.zip</code> backup.</p>
-            <form action="/import-backup" method="post" enctype="multipart/form-data" class="flex flex-wrap items-center gap-3">
-                <input type="file" name="backup_file" accept=".zip" required
-                       class="text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700">
-                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-1.5 rounded-lg text-xs font-semibold text-white">
-                    Import Backup
-                </button>
-            </form>
-            <div class="mt-5 pt-5 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <h4 class="text-sm font-semibold text-slate-200 mb-1">Restore Settings (.json)</h4>
-                    <p class="text-xs text-slate-400 mb-2">Restore saved OmniArr settings from a previously exported JSON file.</p>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <input type="file" id="restoreSettingsFile" accept=".json,application/json"
-                               class="text-xs text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700">
-                        <button type="button" onclick="restoreSettingsJson()"
-                                class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-medium">
-                            📥 Restore Settings
-                        </button>
-                    </div>
-                </div>
-                <div>
-                    <h4 class="text-sm font-semibold text-slate-200 mb-1">Restore Database (.db)</h4>
-                    <p class="text-xs text-slate-400 mb-2">Creates a safety copy first and replaces the SQLite DB. Restart <code class="text-slate-200">omniarr.service</code> after restoring.</p>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <input type="file" id="restoreDbFile" accept=".db,application/octet-stream"
-                               class="text-xs text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700">
-                        <button type="button" onclick="restoreDatabaseFile()"
-                                class="bg-amber-700/40 hover:bg-amber-700/60 border border-amber-500/40 text-amber-200 px-3 py-1.5 rounded-lg text-xs font-medium">
-                            ♻️ Restore DB
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <script>
-            async function restoreSettingsJson() {
-                const inp = document.getElementById("restoreSettingsFile");
-                if (!inp || !inp.files.length) return alert("Choose a .json settings file first.");
-                const fd = new FormData();
-                fd.append("settings_file", inp.files[0]);
-                const res = await fetch("/api/settings/import", { method: "POST", body: fd });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) return alert(data.detail || "Failed to restore settings.");
-                alert("Settings restored (" + (data.imported_keys || 0) + " keys). Reloading...");
-                window.location.reload();
-            }
-            async function restoreDatabaseFile() {
-                const inp = document.getElementById("restoreDbFile");
-                if (!inp || !inp.files.length) return alert("Choose a .db backup file first.");
-                if (!confirm("Replace the current OmniArr database with this backup? A pre-restore safety copy will be kept.")) return;
-                const fd = new FormData();
-                fd.append("db_file_upload", inp.files[0]);
-                const res = await fetch("/api/settings/restore-db", { method: "POST", body: fd });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) return alert(data.detail || "Failed to restore database.");
-                alert("Database restored. Restart omniarr.service on the server to reload all connections.");
-            }
-            </script>
-        </div>
-        </div>
-        {% endif %}
         {% endif %}
         {% endif %}
         {% if active_tab == 'activity' %}
@@ -673,7 +594,7 @@
                     ('profiles', '🎚️ Profiles & Custom Formats'),
                     ('indexers', '🔎 Indexers (' ~ indexers|length ~ ')'),
                     ('clients', '⬇️ Download Clients'),
-                    ('connect', '🔌 Connect & Backup'),
+                    ('connect', '🔌 Connections'),
                     ('backup', '💾 Backup & Restore')
                 ] %}
                 {% for skey, slabel in sec_tabs %}
@@ -1167,10 +1088,6 @@
                                 class="bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 px-3 py-1.5 rounded text-xs font-medium">
                             📋 Copy Seerr Connection Info
                         </button>
-                        <a href="/api/settings/export"
-                           class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs font-medium">
-                            📤 Export Settings (.json)
-                        </a>
                     </div>
                 </div>
             </div>
@@ -1179,6 +1096,86 @@
         </form>
         
 
+        {% endif %}
+
+        {% if settings_section == 'backup' %}
+        <div class="space-y-6 max-w-6xl">
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl">
+                <h2 class="text-lg font-semibold text-indigo-300 mb-1">💾 Database &amp; Settings Backups</h2>
+                <p class="text-xs text-slate-400 mb-4">Download a consistent snapshot of your SQLite database or export your saved settings as JSON.</p>
+                <div class="flex flex-wrap items-center gap-3">
+                    <a href="/api/settings/backup"
+                       class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-2 rounded-lg text-xs font-medium">
+                        💾 Download Database Backup (.db)
+                    </a>
+                    <a href="/api/settings/export"
+                       class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-2 rounded-lg text-xs font-medium">
+                        📤 Export Settings (.json)
+                    </a>
+                </div>
+            </div>
+        <div class=\"bg-slate-900 border border-slate-800 p-5 rounded-xl\"">
+            <h3 class="text-base font-bold text-indigo-300 mb-1">📦 Migrate from *Arr Backup</h3>
+            <p class="text-xs text-slate-400 mb-3">Import existing libraries, quality profiles, and indexers from a Sonarr, Radarr, Lidarr, or Prowlarr <code class="text-slate-200">.zip</code> backup.</p>
+            <form action="/import-backup" method="post" enctype="multipart/form-data" class="flex flex-wrap items-center gap-3">
+                <input type="file" name="backup_file" accept=".zip" required
+                       class="text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700">
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-1.5 rounded-lg text-xs font-semibold text-white">
+                    Import Backup
+                </button>
+            </form>
+            <div class="mt-5 pt-5 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <h4 class="text-sm font-semibold text-slate-200 mb-1">Restore Settings (.json)</h4>
+                    <p class="text-xs text-slate-400 mb-2">Restore saved OmniArr settings from a previously exported JSON file.</p>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <input type="file" id="restoreSettingsFile" accept=".json,application/json"
+                               class="text-xs text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700">
+                        <button type="button" onclick="restoreSettingsJson()"
+                                class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-medium">
+                            📥 Restore Settings
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <h4 class="text-sm font-semibold text-slate-200 mb-1">Restore Database (.db)</h4>
+                    <p class="text-xs text-slate-400 mb-2">Creates a safety copy first and replaces the SQLite DB. Restart <code class="text-slate-200">omniarr.service</code> after restoring.</p>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <input type="file" id="restoreDbFile" accept=".db,application/octet-stream"
+                               class="text-xs text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700">
+                        <button type="button" onclick="restoreDatabaseFile()"
+                                class="bg-amber-700/40 hover:bg-amber-700/60 border border-amber-500/40 text-amber-200 px-3 py-1.5 rounded-lg text-xs font-medium">
+                            ♻️ Restore DB
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <script>
+            async function restoreSettingsJson() {
+                const inp = document.getElementById("restoreSettingsFile");
+                if (!inp || !inp.files.length) return alert("Choose a .json settings file first.");
+                const fd = new FormData();
+                fd.append("settings_file", inp.files[0]);
+                const res = await fetch("/api/settings/import", { method: "POST", body: fd });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) return alert(data.detail || "Failed to restore settings.");
+                alert("Settings restored (" + (data.imported_keys || 0) + " keys). Reloading...");
+                window.location.reload();
+            }
+            async function restoreDatabaseFile() {
+                const inp = document.getElementById("restoreDbFile");
+                if (!inp || !inp.files.length) return alert("Choose a .db backup file first.");
+                if (!confirm("Replace the current OmniArr database with this backup? A pre-restore safety copy will be kept.")) return;
+                const fd = new FormData();
+                fd.append("db_file_upload", inp.files[0]);
+                const res = await fetch("/api/settings/restore-db", { method: "POST", body: fd });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) return alert(data.detail || "Failed to restore database.");
+                alert("Database restored. Restart omniarr.service on the server to reload all connections.");
+            }
+            </script>
+        </div>
+        </div>
         {% endif %}
         {% endif %}
 
