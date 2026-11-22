@@ -958,7 +958,7 @@
         {% endif %}
 
         {% if settings_section == 'connect' %}
-        <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-6 max-w-3xl">
+        <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-6 max-w-6xl">
             <input type="hidden" name="section" value="connect">
 
             <!-- Plex Connection -->
@@ -1097,7 +1097,7 @@
             <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save General & Connect Settings</button>
         </form>
         
-        <div class="mt-6 bg-slate-900 border border-slate-800 p-5 rounded-xl">
+        <div class="mt-6 bg-slate-900 border border-slate-800 p-5 rounded-xl max-w-6xl">
             <h3 class="text-base font-bold text-indigo-300 mb-1">📦 Migrate from *Arr Backup</h3>
             <p class="text-xs text-slate-400 mb-3">Import existing libraries, quality profiles, and indexers from a Sonarr, Radarr, Lidarr, or Prowlarr <code class="text-slate-200">.zip</code> backup.</p>
             <form action="/import-backup" method="post" enctype="multipart/form-data" class="flex flex-wrap items-center gap-3">
