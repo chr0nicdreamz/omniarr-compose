@@ -666,6 +666,77 @@ def download_db_backup():
     return FileResponse(tmp.name, filename="omniarr-backup.db", media_type="application/octet-stream")
 
 
+def _resolve_active_db_path() -> Path:
+    cfg_db = Path("/app/config/omniarr.db")
+    if cfg_db.exists():
+        return cfg_db
+    return Path("omniarr.db")
+
+
+@app.get("/api/settings/export")
+def export_settings_json(db: Session = Depends(get_db)):
+    import json
+    from fastapi.responses import Response
+    payload = {
+        "version": 1,
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "settings": get_settings(db),
+    }
+    return Response(
+        content=json.dumps(payload, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=omniarr-settings.json"},
+    )
+
+
+@app.post("/api/settings/import")
+async def import_settings_json(settings_file: UploadFile = File(...), db: Session = Depends(get_db)):
+    import json
+    raw = await settings_file.read()
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON file: {exc}")
+    if not isinstance(data, dict) or not isinstance(data.get("settings"), dict):
+        raise HTTPException(status_code=400, detail="JSON must contain a top-level settings object.")
+    save_settings(db, data["settings"])
+    record_history(db, "settings", "Settings Restored", f"Imported settings from {settings_file.filename or "json"}")
+    return {"ok": True, "imported_keys": len(data["settings"])}
+
+
+@app.post("/api/settings/restore-db")
+async def restore_db_backup(db_file_upload: UploadFile = File(...), db: Session = Depends(get_db)):
+    import shutil
+    content = await db_file_upload.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded database file is empty.")
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+    tmp.write(content)
+    tmp.close()
+    try:
+        chk = sqlite3.connect(tmp.name)
+        res = chk.execute("PRAGMA integrity_check;").fetchone()
+        chk.close()
+        if not res or str(res[0]).lower() != "ok":
+            raise HTTPException(status_code=400, detail="Uploaded SQLite database failed integrity_check.")
+    except HTTPException:
+        Path(tmp.name).unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        Path(tmp.name).unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=f"Invalid SQLite file: {exc}")
+
+    target_db = _resolve_active_db_path()
+    safety_copy = target_db.with_name(f"{target_db.stem}.pre-restore.bak")
+    if target_db.exists():
+        shutil.copy2(target_db, safety_copy)
+    shutil.move(tmp.name, target_db)
+    for ext in ("-wal", "-shm"):
+        Path(f"{target_db}{ext}").unlink(missing_ok=True)
+    record_history(db, "settings", "Database Restored", f"Restored SQLite DB from {db_file_upload.filename or "upload"}; safety copy at {safety_copy.name}")
+    return {"ok": True, "restored_to": str(target_db), "safety_backup": str(safety_copy), "restart_recommended": True}
+
+
 async def _bg_sync_calendar():
     db = SessionLocal()
     try:
