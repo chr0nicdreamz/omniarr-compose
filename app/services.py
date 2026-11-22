@@ -1781,18 +1781,21 @@ async def fetch_tautulli_watch_stats(cfg: dict, items: list) -> dict:
             "top_users": [],
         }
 
-def _probe_video_file(fpath: Path) -> dict:
+def _probe_video_file(fpath: Path, allow_ffprobe: bool = True) -> dict:
+    import shutil as _shutil
     info = {"codec": "unknown", "resolution": "unknown", "audio": "unknown", "size_gb": 0.0}
     try:
         info["size_gb"] = round(fpath.stat().st_size / (1024**3), 2)
     except Exception:
         pass
     try:
+        if not allow_ffprobe or not _shutil.which("ffprobe"):
+            raise RuntimeError("ffprobe unavailable or skipped")
         cmd = [
             "ffprobe", "-v", "quiet", "-print_format", "json",
             "-show_streams", str(fpath)
         ]
-        out = _subprocess.check_output(cmd, timeout=8, stderr=_subprocess.DEVNULL)
+        out = _subprocess.check_output(cmd, timeout=2.5, stderr=_subprocess.DEVNULL)
         streams = _json.loads(out).get("streams") or []
         for st in streams:
             ctype = st.get("codec_type")
@@ -1834,15 +1837,35 @@ def run_library_health_audit(db: Session) -> dict:
     duplicates = []
     tracked_paths = set()
 
+    probed_count = 0
+    max_probes = 150
     for it in items:
         if not it.file_path:
             continue
         p = Path(it.file_path)
-        if not p.exists():
+        try:
+            if not p.exists():
+                continue
+        except Exception:
             continue
-        vfiles = [p] if p.is_file() else [f for f in p.rglob("*") if f.is_file() and f.suffix.lower() in video_exts and "sample" not in f.name.lower()]
+        vfiles = []
+        try:
+            if p.is_file():
+                if p.suffix.lower() in video_exts and "sample" not in p.name.lower():
+                    vfiles = [p]
+            else:
+                for f in p.rglob("*"):
+                    if f.is_file() and f.suffix.lower() in video_exts and "sample" not in f.name.lower():
+                        vfiles.append(f)
+                        if len(vfiles) >= 25:
+                            break
+        except Exception:
+            vfiles = []
         for vf in vfiles:
-            tracked_paths.add(str(vf.resolve()))
+            try:
+                tracked_paths.add(str(vf.resolve()))
+            except Exception:
+                tracked_paths.add(str(vf))
         if it.media_type == "movie" and len(vfiles) > 1:
             duplicates.append({
                 "id": it.id,
@@ -1850,10 +1873,13 @@ def run_library_health_audit(db: Session) -> dict:
                 "folder": str(p),
                 "files": [f"{f.name} ({round(f.stat().st_size / (1024**3), 2)} GB)" for f in vfiles],
             })
-        # Probe first/largest file per item for fast summary
+        # Probe first/largest file per item with a cap so large libraries do not time out
         if vfiles:
             primary = max(vfiles, key=lambda f: f.stat().st_size)
-            meta = _probe_video_file(primary)
+            can_probe = probed_count < max_probes
+            meta = _probe_video_file(primary, allow_ffprobe=can_probe)
+            if can_probe:
+                probed_count += 1
             codec_counts[meta["codec"]] = codec_counts.get(meta["codec"], 0) + 1
             res_counts[meta["resolution"]] = res_counts.get(meta["resolution"], 0) + 1
             if meta["codec"] in ("H264", "AVC") and meta["size_gb"] >= 2.0:
@@ -1871,8 +1897,12 @@ def run_library_health_audit(db: Session) -> dict:
     # Scan download mount for orphaned unlinked video files
     orphaned_downloads = []
     dl_mount = Path((cfg.get("qbit_local_mount") or "").strip())
+    scanned_dl_files = 0
     if dl_mount.exists() and dl_mount.is_dir():
         for f in dl_mount.rglob("*"):
+            scanned_dl_files += 1
+            if scanned_dl_files > 2500:
+                break
             if f.is_file() and f.suffix.lower() in video_exts and "sample" not in f.name.lower():
                 try:
                     sz_gb = round(f.stat().st_size / (1024**3), 2)

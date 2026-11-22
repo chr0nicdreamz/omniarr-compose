@@ -1552,9 +1552,18 @@ async def api_tautulli_overview(db: Session = Depends(get_db)):
     return {"activity": activity, "stats": stats}
 
 
+_AUDIT_CACHE = {"ts": 0.0, "data": None}
+
 @app.get("/api/health/audit")
-def api_health_audit(db: Session = Depends(get_db)):
-    return run_library_health_audit(db)
+def api_health_audit(force: bool = False, db: Session = Depends(get_db)):
+    import time as _t
+    now = _t.time()
+    if not force and _AUDIT_CACHE["data"] is not None and (now - _AUDIT_CACHE["ts"]) < 300:
+        return _AUDIT_CACHE["data"]
+    res = run_library_health_audit(db)
+    _AUDIT_CACHE["ts"] = now
+    _AUDIT_CACHE["data"] = res
+    return res
 
 
 @app.post("/api/health/delete-orphan")

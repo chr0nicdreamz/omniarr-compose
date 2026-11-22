@@ -246,18 +246,6 @@
         {% endmacro %}
 
         <!-- TAB 1: SPLIT LIBRARY -->
-        <!-- Tautulli Live Active Streams Banner -->
-        <div id="tautulli-live-bar" class="hidden mb-5 bg-gradient-to-r from-amber-950/50 via-slate-900 to-slate-900 border border-amber-500/40 rounded-xl p-3.5 shadow-lg">
-            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-                <div class="flex items-center gap-2">
-                    <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
-                    <span id="tautulli-stream-summary" class="text-xs font-bold text-amber-300">Tautulli Live Streams</span>
-                </div>
-                <span id="tautulli-bw-badge" class="text-[11px] font-mono text-slate-400"></span>
-            </div>
-            <div id="tautulli-sessions-list" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs"></div>
-        </div>
-
         {% if active_tab == 'library' %}
         <!-- Quick Add & Search Bar -->
         <form action="/add" method="post" class="bg-slate-900 border border-slate-800 p-4 rounded-xl mb-6 flex flex-wrap gap-3 items-end">
@@ -1272,7 +1260,7 @@
                     <h2 class="text-lg font-bold text-indigo-300">📊 Library Health, Codec &amp; Storage Auditor</h2>
                     <p class="text-xs text-slate-400">Inspect H.264 vs. HEVC/AV1 codecs for Tdarr transcoding, catch duplicate files &amp; orphaned downloads, and review Tautulli unwatched media.</p>
                 </div>
-                <button type="button" onclick="loadHealthAndTautulli()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-semibold">
+                <button type="button" onclick="loadHealthAndTautulli(true)" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-semibold">
                     ↻ Run Full Audit
                 </button>
             </div>

@@ -77,57 +77,7 @@
             if (typeof pollBackgroundTasks === 'function') pollBackgroundTasks();
         }
 
-        async function loadTautulliLiveBar() {
-            const bar = document.getElementById('tautulli-live-bar');
-            const list = document.getElementById('tautulli-sessions-list');
-            if (!bar || !list) return;
-            try {
-                const res = await fetch('/api/tautulli/overview');
-                const data = await res.json();
-                const act = data.activity || {};
-                const stats = data.stats || {};
-                if (!act.configured) {
-                    bar.classList.add('hidden');
-                    return;
-                }
-                bar.classList.remove('hidden');
-                const summaryEl = document.getElementById('tautulli-stream-summary');
-                const bwEl = document.getElementById('tautulli-bw-badge');
-                if (act.error) {
-                    summaryEl.innerHTML = `Tautulli Connection Error: <span class="text-rose-300 font-normal">${act.error}</span> · <a href="/?tab=settings&section=connect" class="underline text-indigo-300">Check URL/Key</a>`;
-                    bwEl.textContent = '';
-                    list.innerHTML = '';
-                    return;
-                }
-                const recent = (stats.recent_watches || [])[0];
-                if (!act.sessions || !act.sessions.length) {
-                    const lastTxt = recent ? ` · Last watched: <strong class="text-slate-200">${recent.title}</strong> (${recent.user})` : '';
-                    summaryEl.innerHTML = `Tautulli Connected: <span class="text-slate-300 font-normal">0 Active Streams</span>${lastTxt}`;
-                    bwEl.innerHTML = `<a href="/?tab=tautulli" class="text-amber-300 hover:underline font-semibold">Open Tautulli Stats →</a>`;
-                    list.innerHTML = '';
-                    return;
-                }
-                summaryEl.textContent = `Tautulli Live: ${act.stream_count} Active Stream${act.stream_count === 1 ? '' : 's'}`;
-                bwEl.innerHTML = `${act.total_bandwidth ? Math.round(act.total_bandwidth / 1000) + ' Mbps · ' : ''}<a href="/?tab=tautulli" class="text-amber-300 hover:underline font-semibold">Full Tautulli View →</a>`;
-                list.innerHTML = act.sessions.map(s => {
-                    const isTranscode = String(s.transcode_decision || '').toLowerCase().includes('transcode');
-                    const badge = isTranscode
-                        ? `<span class="px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-700/50 text-[10px] font-bold">TRANSCODE</span>`
-                        : `<span class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700/50 text-[10px] font-bold">DIRECT PLAY</span>`;
-                    return `<div class="bg-slate-950/90 border border-slate-800 rounded-lg p-2.5 flex flex-col gap-1">
-                        <div class="flex items-center justify-between gap-2">
-                            <span class="font-semibold text-slate-100 truncate">${s.title}</span>
-                            ${badge}
-                        </div>
-                        <div class="flex items-center justify-between text-[11px] text-slate-400">
-                            <span>👤 ${s.user} · ${s.player}</span>
-                            <span class="font-mono text-indigo-300">${s.progress_percent}%</span>
-                        </div>
-                    </div>`;
-                }).join('');
-            } catch (e) {}
-        }
-        loadTautulliLiveBar();
+
 
         async function loadDedicatedTautulliTab() {
             const liveGrid = document.getElementById('tt-live-grid');
@@ -318,16 +268,23 @@
             }
         }
 
-        async function loadHealthAndTautulli() {
+        async function loadHealthAndTautulli(force = false) {
             const cards = document.getElementById('health-summary-cards');
             if (!cards) return;
+            if (force) {
+                cards.innerHTML = '<div class="bg-slate-900 border border-slate-800 rounded-xl p-4 text-slate-400 col-span-full">Running fresh library health audit...</div>';
+            }
             try {
                 const [hRes, tRes] = await Promise.all([
-                    fetch('/api/health/audit'),
+                    fetch('/api/health/audit' + (force ? '?force=true' : '')),
                     fetch('/api/tautulli/overview')
                 ]);
                 const h = await hRes.json();
-                const t = await tRes.json();
+                const t = hRes.ok ? await tRes.json() : { stats: {} };
+                if (!hRes.ok) {
+                    cards.innerHTML = `<div class="bg-rose-950/40 border border-rose-500/40 rounded-xl p-4 text-rose-300 col-span-full">Health audit error: ${h.detail || hRes.status}</div>`;
+                    return;
+                }
                 const codecsStr = Object.entries(h.codecs || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'None';
                 const resStr = Object.entries(h.resolutions || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'None';
                 cards.innerHTML = `
@@ -364,7 +321,7 @@
                 const orphBox = document.getElementById('health-orphans-list');
                 const orphs = h.orphaned_downloads || [];
                 orphBox.innerHTML = orphs.length
-                    ? orphs.map(o => `<div class="bg-slate-950 border border-slate-800 rounded-lg p-3 flex items-center justify-between gap-2"><div class="truncate"><div class="font-mono text-slate-200 truncate" title="${o.path}">${o.name}</div><div class="text-[11px] text-slate-500">${o.size_gb} GB</div></div><button type="button" onclick="deleteOrphanFile(this, '${o.path.replace(/'/g, "\'")}')" class="shrink-0 bg-rose-600/20 hover:bg-rose-600/40 border border-rose-500/40 text-rose-300 px-2.5 py-1 rounded text-[11px]">Delete</button></div>`).join('')
+                    ? orphs.map(o => `<div class="bg-slate-950 border border-slate-800 rounded-lg p-3 flex items-center justify-between gap-2"><div class="truncate"><div class="font-mono text-slate-200 truncate" title="${o.path}">${o.name}</div><div class="text-[11px] text-slate-500">${o.size_gb} GB</div></div><button type="button" data-orphan-path="${encodeURIComponent(o.path)}" onclick="deleteOrphanFile(this, decodeURIComponent(this.dataset.orphanPath || ''))" class="shrink-0 bg-rose-600/20 hover:bg-rose-600/40 border border-rose-500/40 text-rose-300 px-2.5 py-1 rounded text-[11px]">Delete</button></div>`).join('')
                     : '<div class="text-slate-500">No orphaned video downloads found.</div>';
 
                 const staleBox = document.getElementById('tautulli-stale-list');
