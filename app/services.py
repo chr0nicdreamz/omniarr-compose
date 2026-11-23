@@ -1265,23 +1265,42 @@ async def get_poster_candidates(db: Session, item: MediaItem) -> list[dict]:
     if _find_local_poster_file(item.file_path):
         add_cand("Disk", "Local Folder Artwork", f"/api/media/{item.id}/local-poster")
 
-    # 3. Plex server hubs (includes Kometa overlays applied inside Plex)
+    # 3. Plex server hubs + collections
     plex_url = (cfg.get("plex_url") or "").split("/web")[0].strip().rstrip("/")
     plex_tok = (cfg.get("plex_token") or "").strip()
-    clean_q = re.sub(r"[^a-zA-Z0-9\s]", " ", item.title or "").strip()
-    words = [w for w in clean_q.split() if w]
-    queries = [clean_q]
-    if len(words) >= 2:
-        queries.append(" ".join(words[:2]))
+    raw_title = (item.title or "").strip()
+    clean_q = re.sub(r"[^a-zA-Z0-9\s]", " ", raw_title).strip()
+    base_no_coll = re.sub(r"\bcollection\b", "", clean_q, flags=re.I).strip()
+    words = [w for w in (base_no_coll or clean_q).split() if w]
+    queries = [q for q in [clean_q, base_no_coll, " ".join(words[:2]) if len(words) >= 2 else ""] if q]
 
-    async with httpx.AsyncClient(verify=False, timeout=8.0) as client:
+    async with httpx.AsyncClient(verify=False, timeout=5.0) as client:
         if plex_url and plex_tok:
+            p_headers = {"X-Plex-Token": plex_tok, "Accept": "application/json"}
+            # Search Plex collections across movie/show sections when title looks like a collection
+            if "collection" in raw_title.lower() or getattr(item, "media_type", "") == "collection":
+                try:
+                    sec_r = await client.get(f"{plex_url}/library/sections", headers=p_headers)
+                    if sec_r.status_code == 200:
+                        for sec in (sec_r.json().get("MediaContainer") or {}).get("Directory") or []:
+                            sec_key = sec.get("key")
+                            if not sec_key:
+                                continue
+                            cr = await client.get(f"{plex_url}/library/sections/{sec_key}/collections", headers=p_headers)
+                            if cr.status_code == 200:
+                                for meta in (cr.json().get("MediaContainer") or {}).get("Metadata") or []:
+                                    c_title = meta.get("title") or ""
+                                    if (base_no_coll or clean_q).lower() in c_title.lower() and meta.get("thumb"):
+                                        add_cand("Plex Collection", c_title, f"{plex_url}{meta['thumb']}?X-Plex-Token={plex_tok}")
+                except Exception:
+                    pass
+
             for q in dict.fromkeys(queries):
                 try:
                     r = await client.get(
                         f"{plex_url}/hubs/search",
                         params={"query": q, "limit": 10},
-                        headers={"X-Plex-Token": plex_tok, "Accept": "application/json"},
+                        headers=p_headers,
                     )
                     if r.status_code == 200:
                         for hub in (r.json().get("MediaContainer") or {}).get("Hub") or []:
@@ -1294,10 +1313,28 @@ async def get_poster_candidates(db: Session, item: MediaItem) -> list[dict]:
                 except Exception:
                     pass
 
-        # 4. iTunes / TVMaze public artwork fallback
+        # 4. TMDB public metadata (collections + movies/shows) if key configured
+        tmdb_key = (cfg.get("tmdb_api_key") or "").strip()
+        if tmdb_key:
+            try:
+                endpoint = "collection" if "collection" in raw_title.lower() else ("tv" if item.media_type == "tv" else "movie")
+                tr = await client.get(
+                    f"https://api.themoviedb.org/3/search/{endpoint}",
+                    params={"api_key": tmdb_key, "query": base_no_coll or clean_q},
+                )
+                if tr.status_code == 200:
+                    for row in (tr.json().get("results") or [])[:6]:
+                        pp = row.get("poster_path")
+                        if pp:
+                            t_name = row.get("name") or row.get("title") or item.title
+                            add_cand("TMDB", t_name, f"https://image.tmdb.org/t/p/w500{pp}")
+            except Exception:
+                pass
+
+        # 5. iTunes / TVMaze public artwork fallback
         try:
             if item.media_type == "tv":
-                r = await client.get("https://api.tvmaze.com/search/shows", params={"q": clean_q})
+                r = await client.get("https://api.tvmaze.com/search/shows", params={"q": base_no_coll or clean_q})
                 if r.status_code == 200:
                     for row in (r.json() or [])[:5]:
                         show = row.get("show") or {}
@@ -1305,7 +1342,8 @@ async def get_poster_candidates(db: Session, item: MediaItem) -> list[dict]:
                         if img:
                             add_cand("TVMaze", show.get("name") or item.title, img)
             else:
-                q_term = f"{clean_q} {item.year}" if item.year else clean_q
+                search_base = base_no_coll or clean_q
+                q_term = f"{search_base} {item.year}" if item.year else search_base
                 r = await client.get("https://itunes.apple.com/search", params={"term": q_term, "media": "movie", "entity": "movie", "limit": 6})
                 if r.status_code == 200:
                     for res in (r.json().get("results") or []):

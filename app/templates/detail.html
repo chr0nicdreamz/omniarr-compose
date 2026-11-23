@@ -500,6 +500,7 @@
             grid.innerHTML = '<div class="text-slate-400 col-span-full py-6 text-center">Searching Plex & metadata sources...</div>';
             try {
                 const res = await fetch('/api/media/{{ item.id }}/posters');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 const cands = data.candidates || [];
                 if (!cands.length) {
@@ -507,7 +508,7 @@
                     return;
                 }
                 grid.innerHTML = cands.map(c => `
-                    <div onclick="selectPosterCandidate('${c.url.replace(/'/g, "\'")}')" class="cursor-pointer group bg-slate-950 border border-slate-800 hover:border-indigo-500 rounded-xl overflow-hidden flex flex-col">
+                    <div data-url="${c.url.replace(/"/g, "&quot;")}" onclick="selectPosterCandidate(this.dataset.url)" class="cursor-pointer group bg-slate-950 border border-slate-800 hover:border-indigo-500 rounded-xl overflow-hidden flex flex-col">
                         <div class="aspect-[2/3] bg-slate-900 overflow-hidden">
                             <img src="${c.url}" class="w-full h-full object-cover group-hover:scale-105 transition" loading="lazy">
                         </div>
