@@ -871,7 +871,7 @@
                             <div class="font-semibold text-slate-100">Master Automation</div>
                             <div class="text-slate-400">Global switch for all scheduled background tasks</div>
                         </div>
-                        <input type="checkbox" name="automation_enabled" value="true" class="w-4 h-4 accent-indigo-500"
+                        <input type="checkbox" name="automation_enabled" value="true" onchange="toggleAutomationSetting('automation_enabled', this.checked)" class="w-4 h-4 accent-indigo-500"
                                {{ 'checked' if cfg.get('automation_enabled', 'true')|lower != 'false' else '' }}>
                     </label>
                     <label class="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-lg p-3 cursor-pointer">
@@ -1640,5 +1640,20 @@
         <div id="omni-qbit-items" class="flex flex-wrap items-center gap-4 overflow-x-auto"></div>
     </div>
 
+
+<script>
+async function toggleAutomationSetting(key, enabled) {
+    try {
+        const res = await fetch('/api/settings/automation-toggle', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({key, enabled})
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+    } catch (e) {
+        console.error('Failed to save automation toggle:', e);
+    }
+}
+</script>
 </body>
 </html>
