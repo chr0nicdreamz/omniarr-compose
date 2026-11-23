@@ -84,6 +84,10 @@ DEFAULT_SETTINGS = {
     "blocked_keywords": "CAM, HDCAM, TS, TELESYNC, TC, SCREENER, R5",
     "rss_sync_minutes": "2",
     "stalled_timeout_minutes": "120",
+    "automation_enabled": "true",
+    "auto_import_enabled": "true",
+    "auto_hunt_enabled": "true",
+    "auto_upgrade_enabled": "true",
 }
 
 QUALITY_KEYWORDS = {

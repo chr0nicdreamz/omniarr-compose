@@ -879,7 +879,7 @@
                             <div class="font-semibold text-slate-100">Auto Download &amp; Import</div>
                             <div class="text-slate-400">Poll download client and import completed files</div>
                         </div>
-                        <input type="checkbox" name="auto_import_enabled" value="true" class="w-4 h-4 accent-indigo-500"
+                        <input type="checkbox" name="auto_import_enabled" value="true" onchange="toggleAutomationSetting('auto_import_enabled', this.checked)" class="w-4 h-4 accent-indigo-500"
                                {{ 'checked' if cfg.get('auto_import_enabled', 'true')|lower != 'false' else '' }}>
                     </label>
                     <label class="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-lg p-3 cursor-pointer">
@@ -887,7 +887,7 @@
                             <div class="font-semibold text-slate-100">Auto Hunt (Calendar &amp; Wanted)</div>
                             <div class="text-slate-400">Search Prowlarr and grab wanted/aired releases</div>
                         </div>
-                        <input type="checkbox" name="auto_hunt_enabled" value="true" class="w-4 h-4 accent-indigo-500"
+                        <input type="checkbox" name="auto_hunt_enabled" value="true" onchange="toggleAutomationSetting('auto_hunt_enabled', this.checked)" class="w-4 h-4 accent-indigo-500"
                                {{ 'checked' if cfg.get('auto_hunt_enabled', 'true')|lower != 'false' else '' }}>
                     </label>
                     <label class="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-lg p-3 cursor-pointer">
@@ -895,7 +895,7 @@
                             <div class="font-semibold text-slate-100">Auto Quality Upgrades</div>
                             <div class="text-slate-400">Automatically search for higher-tier upgrades</div>
                         </div>
-                        <input type="checkbox" name="auto_upgrade_enabled" value="true" class="w-4 h-4 accent-indigo-500"
+                        <input type="checkbox" name="auto_upgrade_enabled" value="true" onchange="toggleAutomationSetting('auto_upgrade_enabled', this.checked)" class="w-4 h-4 accent-indigo-500"
                                {{ 'checked' if cfg.get('auto_upgrade_enabled', 'true')|lower != 'false' else '' }}>
                     </label>
                 </div>
