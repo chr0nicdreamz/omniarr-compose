@@ -269,6 +269,10 @@
                     <option value="music">Music</option>
                 </select>
             </div>
+            <button type="button" id="quick-auto-pause-btn" onclick="quickToggleMasterAutomation()"
+                    class="px-3.5 py-2 rounded-lg text-xs font-medium border {{ 'bg-amber-950/70 hover:bg-amber-900/70 text-amber-200 border-amber-700/60' if cfg.get('automation_enabled', 'true')|lower == 'false' else 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' }}">
+                {{ 'Resume Automation' if cfg.get('automation_enabled', 'true')|lower == 'false' else 'Pause Automation' }}
+            </button>
             <button type="button" onclick="openRequestModal()" class="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-sm font-medium shadow">
                 + Request &amp; Configure
             </button>
@@ -1642,6 +1646,17 @@
 
 
 <script>
+
+async function quickToggleMasterAutomation() {
+    const btn = document.getElementById('quick-auto-pause-btn');
+    const currentlyPaused = btn && btn.textContent.trim().startsWith('Resume');
+    const nextEnabled = currentlyPaused;
+    await toggleAutomationSetting('automation_enabled', nextEnabled);
+    if (btn) {
+        btn.textContent = nextEnabled ? 'Pause Automation' : 'Resume Automation';
+    }
+}
+
 async function toggleAutomationSetting(key, enabled) {
     try {
         const res = await fetch('/api/settings/automation-toggle', {

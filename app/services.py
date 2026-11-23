@@ -1629,6 +1629,35 @@ async def sync_calendar_schedules(db) -> dict:
     }
 
 
+
+def _is_season_monitored(item, season_num: int) -> bool:
+    import json as _json
+    raw = getattr(item, "monitored_seasons", None) or "[]"
+    try:
+        parsed = _json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        parsed = []
+    if not parsed:
+        return True
+    return int(season_num) in {int(x) for x in parsed if str(x).isdigit() or isinstance(x, int)}
+
+
+def _resolve_target_root(item, media_type: str, db) -> Path:
+    custom_rf = (getattr(item, "root_folder", None) or "").strip()
+    if custom_rf:
+        p = Path(custom_rf)
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+        except Exception:
+            pass
+    roots = get_media_roots(db).get(media_type, [])
+    if not roots:
+        return Path("/mnt") / media_type
+    best_root = max(roots, key=lambda r: shutil.disk_usage(r).free if r.exists() else -1)
+    best_root.mkdir(parents=True, exist_ok=True)
+    return best_root
+
 async def hunt_aired_calendar_items(db) -> int:
     """Automatically search and grab newly aired missing episodes and released wanted movies."""
     from datetime import datetime
@@ -1652,6 +1681,8 @@ async def hunt_aired_calendar_items(db) -> int:
     )
 
     for ep, show in due_episodes:
+        if not _is_season_monitored(show, getattr(ep, "season_number", 0)):
+            continue
         tag = f"S{ep.season_number:02d}E{ep.episode_number:02d}"
         query = f"{show.title} {tag}"
         try:
