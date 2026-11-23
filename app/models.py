@@ -11,6 +11,8 @@ class MediaItem(Base):
     media_type = Column(String)  # 'movie', 'tv', 'music'
     external_id = Column(String, index=True)
     quality_profile = Column(String, default="1080p")
+    root_folder = Column(String, nullable=True)
+    monitored_seasons = Column(Text, default="[]")
     monitored = Column(Boolean, default=True)
     status = Column(String, default="wanted")  # wanted, downloading, available
     torrent_hash = Column(String, nullable=True)

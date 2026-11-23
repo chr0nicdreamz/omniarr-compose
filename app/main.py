@@ -26,6 +26,16 @@ from .services import (
 from .importer import parse_and_import_backup
 
 Base.metadata.create_all(bind=engine)
+try:
+    from sqlalchemy import text as _sa_text
+    with engine.begin() as _conn:
+        _cols = [r[1] for r in _conn.execute(_sa_text("PRAGMA table_info(media_items)")).fetchall()]
+        if "root_folder" not in _cols:
+            _conn.execute(_sa_text("ALTER TABLE media_items ADD COLUMN root_folder VARCHAR"))
+        if "monitored_seasons" not in _cols:
+            _conn.execute(_sa_text("ALTER TABLE media_items ADD COLUMN monitored_seasons TEXT DEFAULT '[]'"))
+except Exception:
+    pass
 templates = Jinja2Templates(directory="app/templates")
 
 async def scheduled_tasks():
@@ -1118,9 +1128,27 @@ async def add_media(
     year: int = Form(None),
     media_type: str = Form(...),
     quality_profile: str = Form("1080p"),
+    root_folder: str = Form(""),
+    seasons: str = Form(""),
     db: Session = Depends(get_db)
 ):
-    item = MediaItem(title=title, year=year, media_type=media_type, quality_profile=quality_profile)
+    import json as _json
+    parsed_seasons = []
+    if media_type == "tv" and seasons.strip():
+        for part in seasons.split(","):
+            part = part.strip()
+            if part.isdigit():
+                parsed_seasons.append(int(part))
+    chosen_root = root_folder.strip() or None
+    item = MediaItem(
+        title=title,
+        year=year,
+        media_type=media_type,
+        quality_profile=quality_profile,
+        root_folder=chosen_root,
+        file_path=chosen_root,
+        monitored_seasons=_json.dumps(parsed_seasons),
+    )
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -1528,12 +1556,16 @@ def seerr_get_movies(tmdbId: int = None, db: Session = Depends(get_db)):
 @app.post("/api/v3/movie", dependencies=[Depends(verify_api_key)])
 async def seerr_add_movie(payload: dict, db: Session = Depends(get_db)):
     cfg = get_settings(db)
+    rf = (payload.get("rootFolderPath") or "").strip() or None
+    qp = (payload.get("qualityProfileName") or "").strip() or cfg.get("default_movie_quality", "1080p")
     item = MediaItem(
         title=payload.get("title"),
         year=payload.get("year"),
         media_type="movie",
         external_id=str(payload.get("tmdbId", "")),
-        quality_profile=cfg.get("default_movie_quality", "1080p")
+        quality_profile=qp,
+        root_folder=rf,
+        file_path=rf,
     )
     db.add(item)
     db.commit()
@@ -1548,13 +1580,27 @@ def seerr_get_series(tvdbId: int = None, db: Session = Depends(get_db)):
 
 @app.post("/api/v3/series", dependencies=[Depends(verify_api_key)])
 async def seerr_add_series(payload: dict, db: Session = Depends(get_db)):
+    import json as _json
     cfg = get_settings(db)
+    rf = (payload.get("rootFolderPath") or "").strip() or None
+    qp = (payload.get("qualityProfileName") or "").strip() or cfg.get("default_tv_quality", "1080p")
+    raw_seasons = payload.get("seasons") or []
+    sel_seasons = []
+    if isinstance(raw_seasons, list):
+        for s in raw_seasons:
+            if isinstance(s, dict) and s.get("monitored", True) and s.get("seasonNumber") is not None:
+                sel_seasons.append(int(s["seasonNumber"]))
+            elif isinstance(s, int):
+                sel_seasons.append(s)
     item = MediaItem(
         title=payload.get("title"),
         year=payload.get("year"),
         media_type="tv",
         external_id=str(payload.get("tvdbId", "")),
-        quality_profile=cfg.get("default_tv_quality", "1080p")
+        quality_profile=qp,
+        root_folder=rf,
+        file_path=rf,
+        monitored_seasons=_json.dumps(sel_seasons),
     )
     db.add(item)
     db.commit()
