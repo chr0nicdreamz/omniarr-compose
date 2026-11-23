@@ -42,8 +42,12 @@ async def scheduled_tasks():
     from .services import hunt_quality_upgrades
     db = SessionLocal()
     try:
-        await check_downloads_and_import(db)
         cfg = get_settings(db)
+        master_on = str(cfg.get("automation_enabled", "true")).lower() != "false"
+        if not master_on:
+            return
+        if str(cfg.get("auto_import_enabled", "true")).lower() != "false":
+            await check_downloads_and_import(db)
         if str(cfg.get("auto_hunt_enabled", "true")).lower() != "false":
             await hunt_aired_calendar_items(db)
             wanted = db.query(MediaItem).filter(MediaItem.status == "wanted", MediaItem.monitored == True).limit(15).all()
@@ -58,7 +62,8 @@ async def scheduled_tasks():
                         item.torrent_hash = t_hash
                         item.status = "downloading"
                         db.commit()
-        await hunt_quality_upgrades(db)
+        if str(cfg.get("auto_upgrade_enabled", "true")).lower() != "false":
+            await hunt_quality_upgrades(db)
     finally:
         db.close()
 
@@ -1296,6 +1301,22 @@ async def update_settings(request: Request, db: Session = Depends(get_db)):
         updates.setdefault("emby_notify", "false")
     save_settings(db, updates)
     return RedirectResponse(url=f"/?tab={section}&msg=Settings+saved", status_code=303)
+
+@app.post("/api/settings/automation-toggle")
+async def api_automation_toggle(payload: dict, db: Session = Depends(get_db)):
+    cfg = get_settings(db)
+    key = payload.get("key") or "automation_enabled"
+    allowed_keys = {"automation_enabled", "auto_import_enabled", "auto_hunt_enabled", "auto_upgrade_enabled"}
+    if key not in allowed_keys:
+        raise HTTPException(status_code=400, detail="Invalid automation setting key")
+    if "enabled" in payload:
+        new_val = "true" if bool(payload["enabled"]) else "false"
+    else:
+        cur = str(cfg.get(key, "true")).lower() != "false"
+        new_val = "false" if cur else "true"
+    save_settings(db, {key: new_val})
+    return {"ok": True, "key": key, "enabled": (new_val == "true")}
+
 
 
 @app.post("/api/settings/roots/add-batch")
