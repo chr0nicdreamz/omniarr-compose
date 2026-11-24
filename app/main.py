@@ -885,7 +885,7 @@ async def _bg_sync_calendar():
             "calendar_sync",
             "Calendar Air-Date Sync",
             "done",
-            f"Checked {res.get('shows_checked', 0)} shows • Updated {res.get('updated_episodes', 0)} eps, {res.get('updated_movies', 0)} movies","        )
+            f"Checked {res.get('shows_checked', 0)} shows • Updated {res.get('updated_episodes', 0)} eps, {res.get('updated_movies', 0)} movies"        )
     except Exception as e:
         _update_bg_task("calendar_sync", "Calendar Air-Date Sync", "error", str(e))
     finally:
