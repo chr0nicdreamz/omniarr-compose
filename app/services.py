@@ -283,7 +283,7 @@ def _find_local_poster_file(file_path: str | None) -> Path | None:
             return art
     try:
         from datetime import datetime as _dt, timedelta as _td
-        top_title = None[0].get("title", "") if None else "No matches"
+        top_title = "No matches"
         db.add(HistoryEvent(
             event_type="search",
             title=f"{query} ({media_type.upper()})",

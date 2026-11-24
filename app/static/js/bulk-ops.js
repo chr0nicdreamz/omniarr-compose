@@ -98,7 +98,7 @@
                 }
                 if (act.error || stats.error) {
                     statusBox.innerHTML = `<div class="bg-rose-950/40 border border-rose-500/40 text-rose-200 rounded-xl p-4 text-xs">
-                        Tautulli API Error: <strong>${act.error || stats.error}</strong> — verify your Tautulli URL (e.g. <code>http://192.168.11.x:8181</code>) and API Key under <a href="/?tab=settings&section=connect" class="underline font-semibold text-white">Settings → Connect &amp; Backup</a>.
+                        Tautulli API Error: <strong>${act.error || stats.error}</strong> — verify your Tautulli URL (e.g. <code>http://tautulli:8181</code>) and API Key under <a href="/?tab=settings&section=connect" class="underline font-semibold text-white">Settings → Connect &amp; Backup</a>.
                     </div>`;
                 } else {
                     statusBox.innerHTML = '';
