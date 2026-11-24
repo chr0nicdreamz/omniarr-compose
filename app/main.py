@@ -1075,10 +1075,29 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
     page = max(1, min(page, total_pages))
     offset = (page - 1) * per_page
 
+    have_movie_q = movie_q.filter(MediaItem.status == "available")
+    wanted_movie_q = movie_q.filter(MediaItem.status != "available")
+    have_tv_q = tv_q.filter(MediaItem.status == "available")
+    wanted_tv_q = tv_q.filter(MediaItem.status != "available")
+
+    have_movies_count = have_movie_q.count()
+    wanted_movies_count = wanted_movie_q.count()
+    have_tv_count = have_tv_q.count()
+    wanted_tv_count = wanted_tv_q.count()
+
+    have_movies = have_movie_q.order_by(order_col, MediaItem.id.desc()).limit(10).all()
+    wanted_movies = wanted_movie_q.order_by(order_col, MediaItem.id.desc()).limit(10).all()
+    have_tv = have_tv_q.order_by(order_col, MediaItem.id.desc()).limit(10).all()
+    wanted_tv = wanted_tv_q.order_by(order_col, MediaItem.id.desc()).limit(10).all()
+
     if is_overview:
-        items = recent_movies + recent_tv
+        items = have_movies + wanted_movies + have_tv + wanted_tv
+        have_items = have_movies + have_tv
+        wanted_items = wanted_movies + wanted_tv
     else:
         items = active_q.order_by(order_col).offset(offset).limit(per_page).all()
+        have_items = [x for x in items if (x.status or "").lower() == "available"]
+        wanted_items = [x for x in items if (x.status or "").lower() != "available"]
     episode_counts = dict(
         db.query(EpisodeItem.media_item_id, func.count(EpisodeItem.id))
         .group_by(EpisodeItem.media_item_id)
@@ -1220,6 +1239,16 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
         "is_overview": is_overview,
         "recent_movies": recent_movies,
         "recent_tv": recent_tv,
+        "have_movies": have_movies,
+        "wanted_movies": wanted_movies,
+        "have_tv": have_tv,
+        "wanted_tv": wanted_tv,
+        "have_movies_count": have_movies_count,
+        "wanted_movies_count": wanted_movies_count,
+        "have_tv_count": have_tv_count,
+        "wanted_tv_count": wanted_tv_count,
+        "have_items": have_items,
+        "wanted_items": wanted_items,
         "sort": sort,
         "q": search_q,
         "media_type": media_type,
