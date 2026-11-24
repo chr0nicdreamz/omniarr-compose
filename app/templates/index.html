@@ -610,7 +610,7 @@
                     </h3>
                 </div>
                 {% if have_movies %}
-                <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
+                <div style="display: grid;" class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
                     {% for item in have_movies %}
                         {{ render_card(item) }}
                     {% endfor %}
@@ -659,7 +659,7 @@
                     </h3>
                 </div>
                 {% if have_tv %}
-                <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
+                <div style="display: grid;" class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
                     {% for item in have_tv %}
                         {{ render_card(item) }}
                     {% endfor %}
@@ -695,7 +695,7 @@
                 <h2 class="text-xl font-bold text-slate-100">
                     {% if media_type == 'movie' %}🎬 All Movies ({{ total_movies }})
                     {% elif media_type == 'tv' %}📺 All TV Shows ({{ total_tv }})
-                    {% else %}🔍 Search Results ({{ items|length }}){% endif %}
+                    {% else %}🔍 Search Results ({{ active_total if active_total is defined else items|length }}){% endif %}
                 </h2>
                 <div class="flex items-center gap-2 text-xs">
                     <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort=newest&page=1" class="px-2.5 py-1 rounded {{ 'bg-indigo-600 text-white' if sort == 'newest' else 'bg-slate-800 text-slate-300' }}">Newest</a>
@@ -705,9 +705,9 @@
 
             {% if (status_filter or 'all') != 'wanted' %}
             <div class="space-y-2.5">
-                <h3 class="text-sm font-semibold text-emerald-300">✅ What You Have ({{ have_items|length }})</h3>
+                <h3 class="text-sm font-semibold text-emerald-300">✅ What You Have ({{ filtered_have_count if filtered_have_count is defined else have_items|length }} total • {{ have_items|length }} shown)</h3>
                 {% if have_items %}
-                <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
+                <div style="display: grid;" class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
                     {% for item in have_items %}
                         {{ render_card(item) }}
                     {% endfor %}
@@ -721,7 +721,7 @@
             {% if (status_filter or 'all') != 'have' %}
             <details id="details-wanted-drilldown" class="rounded-xl border border-slate-800/90 bg-slate-900/40 p-3.5 space-y-3" open>
                 <summary class="cursor-pointer list-none flex items-center justify-between select-none">
-                    <h3 class="text-sm font-semibold text-amber-300">🎯 Wanted ({{ wanted_items|length }})</h3>
+                    <h3 class="text-sm font-semibold text-amber-300">🎯 Wanted ({{ filtered_wanted_count if filtered_wanted_count is defined else wanted_items|length }} total • {{ wanted_items|length }} shown)</h3>
                     <span class="text-[11px] text-slate-400 hover:text-slate-200">Toggle Wanted</span>
                 </summary>
                 {% if wanted_items %}
@@ -739,10 +739,10 @@
                 <span class="text-slate-400">Showing page {{ page }} of {{ total_pages }}</span>
                 <div class="flex gap-2">
                     {% if page > 1 %}
-                    <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort={{ sort }}&page={{ page - 1 }}" class="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-200">← Previous Page</a>
+                    <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort={{ sort }}&status_filter={{ status_filter or 'all' }}&page={{ page - 1 }}" class="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-200">← Previous Page</a>
                     {% endif %}
                     {% if page < total_pages %}
-                    <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort={{ sort }}&page={{ page + 1 }}" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-white font-medium">Next Page →</a>
+                    <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort={{ sort }}&status_filter={{ status_filter or 'all' }}&page={{ page + 1 }}" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-white font-medium">Next Page →</a>
                     {% endif %}
                 </div>
             </div>
