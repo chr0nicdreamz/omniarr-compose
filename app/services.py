@@ -142,11 +142,11 @@ def get_drive_stats(db: Session = None, force: bool = False) -> list:
     return sorted(drives, key=lambda d: d["mount"])
 
 def translate_qbit_path(remote_path: str, cfg: dict) -> Path:
-    norm_path = (remote_path or "").replace(chr(92), "/")
-    remote_prefix = (cfg.get("qbit_remote_path", "/downloads") or "").replace(chr(92), "/").rstrip("/")
-    local_prefix = (cfg.get("qbit_local_mount", "/downloads") or "/downloads").rstrip("/")
+    norm_path = (remote_path or '').replace('\\', '/')
+    remote_prefix = (cfg.get('qbit_remote_path', '/downloads') or '').replace('\\', '/').rstrip('/')
+    local_prefix = (cfg.get('qbit_local_mount', '/downloads') or '/downloads').rstrip('/')
     if remote_prefix and norm_path.lower().startswith(remote_prefix.lower()):
-        rel = norm_path[len(remote_prefix):].lstrip("/")
+        rel = norm_path[len(remote_prefix):].lstrip('/')
         return Path(local_prefix) / rel
     candidate = Path(local_prefix) / Path(norm_path).name
     if candidate.exists():
