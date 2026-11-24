@@ -1,0 +1,1877 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmniArr — Unified Media Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+<style>
+    .media-card-row { content-visibility: auto; contain-intrinsic-size: 72px; }
+</style>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+    <div class="w-full px-3 sm:px-5 md:px-8 py-3 sm:py-5 overflow-x-hidden">
+        <!-- Top Header -->
+        <header class="flex flex-wrap justify-between items-center gap-4 mb-6 border-b border-slate-800 pb-4">
+            <div>
+                <a href="/?tab=library" title="Back to OmniArr Home" class="inline-flex items-center gap-3 group focus:outline-none">
+                <span class="w-10 h-10 rounded-xl bg-slate-900 border border-indigo-500/40 flex items-center justify-center shadow-lg shadow-indigo-950/50 group-hover:border-indigo-400 group-hover:scale-105 transition">
+                    <svg class="w-6 h-6" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <linearGradient id="omniGrad" x1="0" y1="0" x2="1" y2="1">
+                                <stop offset="0%" stop-color="#818cf8"/>
+                                <stop offset="100%" stop-color="#38bdf8"/>
+                            </linearGradient>
+                        </defs>
+                        <circle cx="32" cy="32" r="21" stroke="url(#omniGrad)" stroke-width="5.5"/>
+                        <polygon points="28,22 43,32 28,42" fill="#e0e7ff"/>
+                    </svg>
+                </span>
+                <span>
+                    <span class="block text-2xl font-extrabold tracking-tight text-indigo-400 group-hover:text-indigo-300 transition">OmniArr</span>
+                    <span class="block text-xs text-slate-400">Unified Sonarr • Radarr • Lidarr • Prowlarr Engine</span>
+                </span>
+            </a>
+            </div>
+            <div id="bg-task-pill" class="hidden items-center gap-2 bg-indigo-950/90 border border-indigo-500/50 text-indigo-200 px-3 py-1 rounded-full text-xs font-medium shadow-lg">
+                    <span id="bg-task-dot" class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+                    <span id="bg-task-text">Background task running...</span>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                <div id="health-pills" class="flex items-center gap-1.5 mr-1 text-[11px] bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg">
+                    <span class="inline-flex items-center gap-1 text-slate-400"><span id="dot-prowlarr" class="w-2 h-2 rounded-full bg-slate-600"></span>Prowlarr</span>
+                    <span class="text-slate-700">•</span>
+                    <span class="inline-flex items-center gap-1 text-slate-400"><span id="dot-qbit" class="w-2 h-2 rounded-full bg-slate-600"></span>qBit</span>
+                    <span class="text-slate-700">•</span>
+                    <span class="inline-flex items-center gap-1 text-slate-400"><span id="dot-media" class="w-2 h-2 rounded-full bg-slate-600"></span><span id="lbl-media">Media</span></span>
+                </div>
+                <form action="/sync-posters" method="post">
+                    <button type="submit" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium text-emerald-300">
+                        🖼 Sync Plex Posters
+                    </button>
+                </form>
+                <button type="button" onclick="triggerRematchAllPosters()" title="Clear all cached posters and re-match the entire library" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium text-amber-300">
+                    🔄 Rematch All
+                </button>
+                <form action="/scan-now" method="post">
+                    <button type="submit" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium text-indigo-300">
+                        ↻ Run Search & Import Now
+                    </button>
+                </form>
+            </div>
+        </header>
+
+        {% if msg %}
+        <div class="mb-5 bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 px-4 py-2.5 rounded-lg text-sm flex justify-between items-center">
+            <span>{{ msg }}</span>
+            <a href="/?tab={{ active_tab }}&sort={{ sort }}" class="text-xs underline">Dismiss</a>
+        </div>
+        {% endif %}
+
+        {% if not cfg.prowlarr_api_key %}
+        <div id="onboarding-banner" class="mb-5 bg-indigo-950/50 border border-indigo-500/40 rounded-xl p-4 text-xs text-slate-200 flex flex-wrap justify-between items-center gap-4">
+            <div>
+                <div class="font-semibold text-indigo-300 text-sm mb-1">Welcome to OmniArr — Quick Setup Checklist</div>
+                <div class="flex flex-wrap gap-3 text-slate-300">
+                    <a href="/?tab=settings&section=media" class="underline hover:text-white">1. Set Media Root Folders</a>
+                    <span>→</span>
+                    <a href="/?tab=settings&section=connect" class="underline hover:text-white">2. Add Prowlarr &amp; qBittorrent</a>
+                    <span>→</span>
+                    <a href="/?tab=settings&section=connect" class="underline hover:text-white">3. Connect Plex/Jellyfin/Emby</a>
+                    <span>→</span>
+                    <a href="/?tab=settings&section=connect" class="underline hover:text-white">4. Copy API Key to Seerr</a>
+                </div>
+            </div>
+            <button type="button" onclick="document.getElementById('onboarding-banner').remove()" class="text-slate-400 hover:text-white underline">Dismiss</button>
+        </div>
+        {% endif %}
+
+        {% set movie_items = items | selectattr('media_type', 'equalto', 'movie') | list %}
+        {% set tv_items = items | selectattr('media_type', 'equalto', 'tv') | list %}
+        {% set music_items = items | selectattr('media_type', 'equalto', 'music') | list %}
+
+        <!-- Navigation Tabs -->
+        <nav class="flex flex-wrap items-center justify-between gap-2 mb-6 bg-slate-900 p-1.5 rounded-lg border border-slate-800 text-xs font-medium">
+            <div class="flex flex-wrap gap-1.5">
+                <a href="/?tab=library"
+                   class="px-4 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'library' else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
+                    🏠 Home
+                </a>
+            <a href="/?tab=calendar"
+               class="px-3.5 py-2 rounded-lg text-xs font-semibold transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'calendar' else 'text-slate-300 hover:bg-slate-800' }}">
+                📅 Calendar
+            </a>
+                <a href="/?tab=collections"
+                   class="px-3.5 py-2 rounded-lg text-xs font-semibold transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'collections' else 'text-slate-300 hover:bg-slate-800' }}">
+                    🎞️ Collections
+                </a>
+                <a href="/?tab=health"
+                   class="px-3.5 py-2 rounded-lg text-xs font-semibold transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'health' else 'text-slate-300 hover:bg-slate-800' }}">
+                    📊 Health &amp; Storage
+                </a>
+{% if cfg.tautulli_url and cfg.tautulli_api_key %}
+                <a href="/?tab=tautulli"
+                   class="px-3.5 py-2 rounded-lg text-xs font-semibold transition {{ 'bg-amber-600 text-white shadow' if active_tab == 'tautulli' else 'text-slate-300 hover:bg-slate-800' }}">
+                    📺 Tautulli
+                </a>
+                {% endif %}
+                <a href="/?tab=activity"
+                   class="px-4 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab in ('activity', 'history') else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
+                    📥 Activity &amp; Logs
+                </a>
+                <a href="/?tab=settings&section=media"
+                   class="px-4 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'settings' else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
+                    ⚙️ Settings
+                </a>
+            </div>
+            <div class="flex items-center gap-2 pr-2 text-[11px] text-slate-400">
+                <a href="/?tab=library&media_type=movie" class="hover:text-indigo-300 transition">🎬 {{ total_movies }} Movies</a>
+                <span>•</span>
+                <a href="/?tab=library&media_type=tv" class="hover:text-indigo-300 transition">📺 {{ total_tv }} TV Shows</a>
+            </div>
+        </nav>
+
+        <!-- MEDIA ITEM MACRO (Supports both Tile Grid & List View) -->
+        {% macro render_card(item) %}
+        {% set ep_count = episode_counts.get(item.id, 0) %}
+        <div class="media-card bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-slate-700 transition flex flex-col">
+            <div class="card-inner flex flex-col h-full">
+                <!-- Poster Container (Large 2:3 in Grid, 24x36 in List) -->
+                <div class="poster-box group relative w-full aspect-[2/3] bg-slate-800 overflow-hidden flex-shrink-0">
+                    <label onclick="event.stopPropagation()" class="absolute top-2 left-2 z-20 inline-flex items-center justify-center w-6 h-6 rounded-md bg-slate-950/80 border border-slate-600/80 cursor-pointer opacity-80 hover:opacity-100 transition" title="Select for bulk action">
+                        <input type="checkbox" value="{{ item.id }}" onchange="toggleBulkCard(this)" class="omni-bulk-cb w-3.5 h-3.5 rounded accent-indigo-500 cursor-pointer">
+                    </label>
+                    {% if item.poster_url %}
+                    <img loading="lazy" decoding="async" src="{{ item.poster_url }}" alt="{{ item.title }}" class="w-full h-full object-cover" loading="lazy">
+                    {% else %}
+                    <div class="w-full h-full flex flex-col items-center justify-center p-3 text-center bg-gradient-to-br from-slate-800 to-slate-900">
+                        <span class="text-xs uppercase tracking-wider text-slate-500 font-bold">{{ item.media_type }}</span>
+                        <span class="text-xs text-slate-400 mt-1 line-clamp-2">{{ item.title }}</span>
+                    </div>
+                    {% endif %}
+
+                    <!-- Status Pill Overlay (Grid Mode) -->
+                    <div class="grid-badge absolute top-2 right-2">
+                        {% if item.status == 'available' %}
+                            <span class="bg-emerald-600/90 backdrop-blur-sm text-white px-2 py-0.5 rounded text-[11px] font-semibold shadow">Available</span>
+                        {% elif item.status == 'downloading' %}
+                            <span class="bg-amber-500/90 backdrop-blur-sm text-slate-950 px-2 py-0.5 rounded text-[11px] font-semibold shadow">Downloading</span>
+                        {% else %}
+                            <span class="bg-rose-600/90 backdrop-blur-sm text-white px-2 py-0.5 rounded text-[11px] font-semibold shadow">Wanted</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Card Details & Action Controls -->
+                <div class="card-body p-3.5 flex-1 flex flex-col justify-between min-w-0">
+                    <div>
+                        <div class="flex items-start justify-between gap-2">
+                            <h4 class="font-semibold text-sm sm:text-base text-slate-100 leading-snug">
+                                <a href="/media/{{ item.id }}" class="hover:text-indigo-400 transition">
+                                    {{ item.title }} {% if item.year %}<span class="text-slate-400 font-normal">({{ item.year }})</span>{% endif %}
+                                </a>
+                            </h4>
+                            <!-- Status Pill (List Mode) -->
+                            <div class="list-badge hidden flex-shrink-0">
+                                {% if item.status == 'available' %}
+                                    <span class="bg-emerald-500/20 text-emerald-300 px-2.5 py-0.5 rounded text-xs font-medium">Available</span>
+                                {% elif item.status == 'downloading' %}
+                                    <span class="bg-amber-500/20 text-amber-300 px-2.5 py-0.5 rounded text-xs font-medium">Downloading</span>
+                                {% else %}
+                                    <span class="bg-rose-500/15 text-rose-300 border border-rose-500/30 px-2.5 py-0.5 rounded text-xs font-medium">Wanted</span>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap items-center gap-1.5 mt-2">
+                            <span class="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 text-[11px] border border-indigo-500/30 font-medium">
+                                {{ item.quality_profile }}
+                            </span>
+                            {% if item.added_at %}
+                            <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 text-[11px] border border-slate-700">
+                                {{ 'Added' if item.status == 'available' else 'Requested' }}: {{ item.added_at.strftime('%Y-%m-%d') }}
+                            </span>
+                            {% endif %}
+                        </div>
+
+                        {% if item.file_path %}
+                        <p class="list-path hidden text-xs text-slate-500 truncate mt-1.5 font-mono">{{ item.file_path }}</p>
+                        {% endif %}
+
+                        {% if ep_count %}
+                        <button type="button" onclick="toggleEpisodes({{ item.id }})"
+                                class="mt-2 inline-flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 font-medium">
+                            <span>▾ {{ ep_count }} Grabbed Ep{{ 's' if ep_count != 1 }}</span>
+                        </button>
+                        {% endif %}
+                    </div>
+
+                    <!-- Action Buttons: Auto Search + Interactive Pick + Remove -->
+                    <div class="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-1.5">
+                        <div class="flex items-center gap-1.5">
+                            <form action="/search/{{ item.id }}" method="post">
+                                <button type="submit" title="Auto-grab best matching release"
+                                        class="bg-slate-800 hover:bg-indigo-600 text-slate-200 hover:text-white border border-slate-700 hover:border-indigo-500 px-2.5 py-1 rounded text-xs font-medium transition">
+                                    🔍 {{ 'Upgrade' if item.status == 'available' else 'Auto' }}
+                                </button>
+                            </form>
+                            <button type="button" data-title="{{ item.title }}" onclick="openManualSearch({{ item.id }}, this.dataset.title)"
+                                    title="Browse all Prowlarr releases and pick manually"
+                                    class="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded text-xs font-medium transition">
+                                📋 Pick
+                            </button>
+                            {% if item.status == 'downloading' %}
+                            <button type="button" onclick="forceImportCard(this, {{ item.id }})"
+                                    title="Import completed torrent into library now"
+                                    class="bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 px-2 py-1 rounded text-xs font-medium transition">
+                                ⬇ Import
+                            </button>
+                            {% endif %}
+                        </div>
+                        <form action="/delete/{{ item.id }}" method="post">
+                            <button type="submit" class="text-rose-400 hover:text-rose-300 text-xs px-1.5 py-1">
+                                Remove
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Lazy-Loaded Grabbed Episodes Drawer -->
+            {% if ep_count %}
+            <div id="eps-{{ item.id }}" data-loaded="false" class="hidden px-3.5 pb-3.5 pt-2 border-t border-slate-800 bg-slate-950/60 max-h-56 overflow-y-auto"></div>
+            {% endif %}
+        </div>
+        {% endmacro %}
+
+        <!-- TAB 1: SPLIT LIBRARY -->
+        {% if active_tab == 'library' %}
+        <!-- Quick Add & Search Bar -->
+        <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl mb-6 flex flex-wrap gap-3 items-end">
+            <div class="flex-1 min-w-[200px]">
+                <label class="block text-xs text-slate-400 mb-1">Request / Add New Title or Show</label>
+                <input type="text" id="quick-req-title" placeholder="e.g. Dune Part Two or Breaking Bad"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();openRequestModal();}"
+                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            </div>
+            <div class="w-24">
+                <label class="block text-xs text-slate-400 mb-1">Year</label>
+                <input type="number" id="quick-req-year" placeholder="2024"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();openRequestModal();}"
+                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+            </div>
+            <div class="w-32">
+                <label class="block text-xs text-slate-400 mb-1">Type</label>
+                <select id="sticky-media-type" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+                    <option value="movie">Movie</option>
+                    <option value="tv">TV Show</option>
+                    <option value="music">Music</option>
+                </select>
+            </div>
+            <button type="button" id="quick-auto-pause-btn" onclick="quickToggleMasterAutomation()"
+                    class="px-3.5 py-2 rounded-lg text-xs font-medium border {{ 'bg-amber-950/70 hover:bg-amber-900/70 text-amber-200 border-amber-700/60' if cfg.get('automation_enabled', 'true')|lower == 'false' else 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' }}">
+                {{ 'Resume Automation' if cfg.get('automation_enabled', 'true')|lower == 'false' else 'Pause Automation' }}
+            </button>
+            <button type="button" onclick="openRequestModal()" class="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-sm font-medium shadow">
+                + Request &amp; Configure
+            </button>
+        </div>
+
+        <!-- Seerr-Style Request / Add Modal -->
+        <div id="request-media-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <form action="/add" method="post" onsubmit="syncSelectedSeasonsInput()" class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+                <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+                    <div>
+                        <h3 id="req-modal-heading" class="text-base font-bold text-indigo-300">Request Media</h3>
+                        <p class="text-xs text-slate-400">Choose seasons, quality profile, and destination root folder</p>
+                    </div>
+                    <button type="button" onclick="closeRequestModal()" class="text-slate-400 hover:text-white text-sm px-2">✕</button>
+                </div>
+
+                <div class="p-5 overflow-y-auto space-y-5 text-xs">
+                    <!-- Title / Year / Type Row -->
+                    <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                        <div class="sm:col-span-6">
+                            <label class="block text-slate-400 mb-1 font-medium">Title</label>
+                            <input type="text" name="title" id="req-modal-title" required
+                                   onchange="if(document.getElementById('req-modal-type').value==='tv') loadTvSeasonsForModal()"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100">
+                        </div>
+                        <div class="sm:col-span-3">
+                            <label class="block text-slate-400 mb-1 font-medium">Year</label>
+                            <input type="number" name="year" id="req-modal-year" placeholder="2024"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100">
+                        </div>
+                        <div class="sm:col-span-3">
+                            <label class="block text-slate-400 mb-1 font-medium">Media Type</label>
+                            <select name="media_type" id="req-modal-type" onchange="onRequestTypeChange()"
+                                    class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100">
+                                <option value="movie">Movie</option>
+                                <option value="tv">TV Show</option>
+                                <option value="music">Music</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- TV Seasons Selector (Hidden for Movies) -->
+                    <div id="req-seasons-section" class="hidden space-y-2.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold uppercase tracking-wider text-slate-300">Seasons</span>
+                            <div class="flex items-center gap-2">
+                                <button type="button" onclick="toggleAllRequestSeasons(true)" class="text-[11px] text-indigo-400 hover:text-indigo-300">Select All</button>
+                                <span class="text-slate-600">|</span>
+                                <button type="button" onclick="toggleAllRequestSeasons(false)" class="text-[11px] text-slate-400 hover:text-slate-300">Clear</button>
+                                <span class="text-slate-600">|</span>
+                                <button type="button" onclick="addManualSeasonRow()" class="text-[11px] text-emerald-400 hover:text-emerald-300">+ Season</button>
+                            </div>
+                        </div>
+                        <div id="req-seasons-list" class="bg-slate-950 border border-slate-800 rounded-xl divide-y divide-slate-800/80 max-h-56 overflow-y-auto">
+                            <div class="p-3 text-slate-400 text-center">Loading seasons...</div>
+                        </div>
+                        <input type="hidden" name="seasons" id="req-selected-seasons" value="">
+                    </div>
+
+                    <!-- Advanced Section (Quality Profile & Root Folder) -->
+                    <div class="space-y-3 pt-1">
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-300 border-b border-slate-800 pb-1.5">Advanced</div>
+                        <div>
+                            <label class="block text-slate-400 mb-1 font-medium">Quality Profile</label>
+                            <select name="quality_profile" id="req-quality-profile" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100">
+                                {% for p in profiles %}
+                                <option value="{{ p.name }}">{{ p.name }}</option>
+                                {% endfor %}
+                                <option value="1080p">1080p</option>
+                                <option value="2160p">2160p (4K)</option>
+                                <option value="720p">720p</option>
+                                <option value="any">Any</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 mb-1 font-medium">Root Folder</label>
+                            <select name="root_folder" id="req-root-folder" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100">
+                                <option value="">Auto (Drive with Most Free Space)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="px-5 py-3.5 border-t border-slate-800 bg-slate-950/60 flex items-center justify-end gap-2.5">
+                    <button type="button" onclick="closeRequestModal()" class="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg text-xs font-medium text-slate-200">Cancel</button>
+                    <button type="submit" id="req-submit-btn" class="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-xs font-semibold text-white shadow">Request &amp; Search</button>
+                </div>
+            </form>
+        </div>
+
+        <script>
+            const OMNI_ROOT_FOLDERS = {{ root_folders | tojson }};
+
+            function populateRequestRootFolders(mediaType) {
+                const sel = document.getElementById('req-root-folder');
+                const matching = (OMNI_ROOT_FOLDERS || []).filter(r => r.media_type === mediaType);
+                sel.innerHTML = '<option value="">Auto (Drive with Most Free Space)</option>' +
+                    matching.map((r, idx) => {
+                        const label = r.free_gb ? `${r.path} (${r.free_gb} GB free)${idx === 0 ? " (Default)" : ""}` : r.path;
+                        return `<option value="${r.path}" ${idx === 0 ? "selected" : ""}>${label}</option>`;
+                    }).join('');
+            }
+
+            function renderRequestSeasonRows(seasons) {
+                const box = document.getElementById('req-seasons-list');
+                if (!seasons.length) {
+                    box.innerHTML = '<div class="p-3 text-slate-400 text-center">No seasons detected—click <strong>+ Season</strong> to add manually or submit for all seasons.</div>';
+                    return;
+                }
+                box.innerHTML = seasons.map(s => `
+                    <label class="flex items-center justify-between px-3.5 py-2.5 cursor-pointer hover:bg-slate-900/70">
+                        <div class="flex items-center gap-3">
+                            <input type="checkbox" class="req-season-cb accent-indigo-500 w-4 h-4 rounded" value="${s.number}" ${s.checked !== false ? "checked" : ""} onchange="updateSeasonSubmitLabel()">
+                            <span class="font-medium text-slate-100">Season ${s.number}</span>
+                            ${s.episodes ? `<span class="text-slate-400">${s.episodes} eps</span>` : ""}
+                        </div>
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-950 text-indigo-300 border border-indigo-800/60">Requested</span>
+                    </label>
+                `).join('');
+                updateSeasonSubmitLabel();
+            }
+
+            function updateSeasonSubmitLabel() {
+                const mtype = document.getElementById('req-modal-type').value;
+                const btn = document.getElementById('req-submit-btn');
+                if (mtype !== 'tv') {
+                    btn.textContent = 'Request & Search';
+                    return;
+                }
+                const checked = document.querySelectorAll('.req-season-cb:checked').length;
+                btn.textContent = checked > 0 ? `Request ${checked} Season${checked === 1 ? "" : "s"}` : 'Request Show';
+            }
+
+            function toggleAllRequestSeasons(state) {
+                document.querySelectorAll('.req-season-cb').forEach(cb => { cb.checked = state; });
+                updateSeasonSubmitLabel();
+            }
+
+            function addManualSeasonRow() {
+                const existing = Array.from(document.querySelectorAll('.req-season-cb')).map(cb => parseInt(cb.value, 10) || 0);
+                const nextNum = existing.length ? Math.max(...existing) + 1 : 1;
+                const current = existing.map(n => ({number: n, checked: document.querySelector(`.req-season-cb[value="${n}"]`)?.checked}));
+                current.push({number: nextNum, checked: true});
+                renderRequestSeasonRows(current);
+            }
+
+            function syncSelectedSeasonsInput() {
+                const vals = Array.from(document.querySelectorAll('.req-season-cb:checked')).map(cb => cb.value);
+                document.getElementById('req-selected-seasons').value = vals.join(',');
+            }
+
+            async function loadTvSeasonsForModal() {
+                const title = document.getElementById('req-modal-title').value.trim();
+                const box = document.getElementById('req-seasons-list');
+                if (!title) {
+                    renderRequestSeasonRows([{number: 1, checked: true}]);
+                    return;
+                }
+                box.innerHTML = '<div class="p-3 text-slate-400 text-center">Fetching seasons from TVMaze...</div>';
+                try {
+                    const sr = await fetch(`https://api.tvmaze.com/singlesearch/shows?q=${encodeURIComponent(title)}&embed=seasons`);
+                    if (!sr.ok) throw new Error('Not found');
+                    const data = await sr.json();
+                    if (data.premiered && !document.getElementById('req-modal-year').value) {
+                        document.getElementById('req-modal-year').value = data.premiered.slice(0, 4);
+                    }
+                    const seasons = ((data._embedded && data._embedded.seasons) || [])
+                        .filter(s => (s.number || 0) > 0)
+                        .map(s => ({number: s.number, episodes: s.episodeOrder || 0, checked: true}));
+                    renderRequestSeasonRows(seasons.length ? seasons : [{number: 1, checked: true}]);
+                } catch (e) {
+                    renderRequestSeasonRows([{number: 1, checked: true}]);
+                }
+            }
+
+            function onRequestTypeChange() {
+                const mtype = document.getElementById('req-modal-type').value;
+                const heading = document.getElementById('req-modal-heading');
+                const seasonsSec = document.getElementById('req-seasons-section');
+                heading.textContent = mtype === 'tv' ? 'Request Series' : (mtype === 'music' ? 'Request Artist / Album' : 'Request Movie');
+                populateRequestRootFolders(mtype);
+                if (mtype === 'tv') {
+                    seasonsSec.classList.remove('hidden');
+                    loadTvSeasonsForModal();
+                } else {
+                    seasonsSec.classList.add('hidden');
+                }
+                updateSeasonSubmitLabel();
+            }
+
+            function openRequestModal() {
+                const title = document.getElementById('quick-req-title').value.trim();
+                const year = document.getElementById('quick-req-year').value.trim();
+                const mtype = document.getElementById('sticky-media-type').value;
+                document.getElementById('req-modal-title').value = title;
+                document.getElementById('req-modal-year').value = year;
+                document.getElementById('req-modal-type').value = mtype;
+                document.getElementById('request-media-modal').classList.remove('hidden');
+                onRequestTypeChange();
+                if (!title) document.getElementById('req-modal-title').focus();
+            }
+
+            function closeRequestModal() {
+                document.getElementById('request-media-modal').classList.add('hidden');
+            }
+        </script>
+
+        <!-- Library Quick Search Bar -->
+        <form method="get" action="/" class="bg-slate-900 border border-slate-800 p-3 rounded-xl mb-6 flex flex-wrap items-center justify-between gap-3">
+            <input type="hidden" name="tab" value="library">
+            <div class="flex flex-1 min-w-[220px] items-center gap-2">
+                <input type="text" name="q" value="{{ q or '' }}" placeholder="Search {{ total_items }} library titles..."
+                       class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100">
+                <select name="media_type" class="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200">
+                    <option value="" {{ 'selected' if not media_type else '' }}>All Types</option>
+                    <option value="movie" {{ 'selected' if media_type == 'movie' else '' }}>Movies ({{ total_movies }})</option>
+                    <option value="tv" {{ 'selected' if media_type == 'tv' else '' }}>TV Shows ({{ total_tv }})</option>
+                </select>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded-lg text-xs font-medium text-white">Filter</button>
+                {% if not is_overview %}
+                <a href="/?tab=library" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg text-xs text-slate-300">← Home Overview</a>
+                {% endif %}
+            </div>
+            {% if not is_overview %}
+            <div class="flex items-center gap-2 text-xs">
+                <span class="text-slate-400">Page {{ page }} of {{ total_pages }}</span>
+                {% if page > 1 %}
+                <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort={{ sort }}&page={{ page - 1 }}" class="bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded">← Prev</a>
+                {% endif %}
+                {% if page < total_pages %}
+                <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort={{ sort }}&page={{ page + 1 }}" class="bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded">Next →</a>
+                {% endif %}
+            </div>
+            {% endif %}
+        </form>
+
+                <!-- Poster Grid Density Toolbar -->
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-2 bg-slate-900/80 border border-slate-800/90 rounded-xl px-3.5 py-2 text-xs">
+            <span class="text-slate-400 font-medium">🖼️ Poster Grid Density:</span>
+            <div class="inline-flex flex-wrap items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+                <button type="button" data-grid-cols="auto" onclick="setOmniGridCols('auto')" class="omni-grid-btn px-2.5 py-1 rounded-md text-[11px] font-semibold bg-indigo-600 text-white">Auto</button>
+                <button type="button" data-grid-cols="6" onclick="setOmniGridCols('6')" class="omni-grid-btn px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-300 hover:bg-slate-800">6 Col</button>
+                <button type="button" data-grid-cols="8" onclick="setOmniGridCols('8')" class="omni-grid-btn px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-300 hover:bg-slate-800">8 Col</button>
+                <button type="button" data-grid-cols="10" onclick="setOmniGridCols('10')" class="omni-grid-btn px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-300 hover:bg-slate-800">10 Col</button>
+                <button type="button" data-grid-cols="12" onclick="setOmniGridCols('12')" class="omni-grid-btn px-2.5 py-1 rounded-md text-[11px] font-semibold text-slate-300 hover:bg-slate-800">12 Col</button>
+            </div>
+        </div>
+        {% if is_overview %}
+        <!-- HOME OVERVIEW: LAST 10 ADDED MOVIES -->
+        <section class="mb-10">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-800 pb-2.5">
+                <a href="/?tab=library&media_type=movie" class="group inline-flex items-center gap-2 text-xl font-bold text-slate-100 hover:text-indigo-400 transition">
+                    <span>🎬 Movies</span>
+                    <span class="text-xs font-normal text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-0.5 rounded-full">Last 10 Added • {{ total_movies }} Total</span>
+                    <span class="text-indigo-400 group-hover:translate-x-1 transition-transform text-base">→</span>
+                </a>
+                <a href="/?tab=library&media_type=movie" class="text-xs font-medium text-indigo-400 hover:text-indigo-300">View All Movies →</a>
+            </div>
+            <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
+                {% for item in recent_movies %}
+                    {{ render_card(item) }}
+                {% endfor %}
+            </div>
+        </section>
+
+        <!-- HOME OVERVIEW: LAST 10 UPDATED TV SHOWS -->
+        <section class="mb-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-800 pb-2.5">
+                <a href="/?tab=library&media_type=tv" class="group inline-flex items-center gap-2 text-xl font-bold text-slate-100 hover:text-indigo-400 transition">
+                    <span>📺 TV Shows</span>
+                    <span class="text-xs font-normal text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-0.5 rounded-full">Last 10 Updated • {{ total_tv }} Total</span>
+                    <span class="text-indigo-400 group-hover:translate-x-1 transition-transform text-base">→</span>
+                </a>
+                <a href="/?tab=library&media_type=tv" class="text-xs font-medium text-indigo-400 hover:text-indigo-300">View All TV Shows →</a>
+            </div>
+            <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
+                {% for item in recent_tv %}
+                    {{ render_card(item) }}
+                {% endfor %}
+            </div>
+        </section>
+        {% else %}
+        <!-- PAGINATED DRILL-DOWN LIBRARY VIEW -->
+        <section class="mb-8">
+            <div class="flex items-center justify-between mb-4 border-b border-slate-800 pb-2.5">
+                <h2 class="text-xl font-bold text-slate-100">
+                    {% if media_type == 'movie' %}🎬 All Movies ({{ total_movies }})
+                    {% elif media_type == 'tv' %}📺 All TV Shows ({{ total_tv }})
+                    {% else %}🔍 Search Results ({{ items|length }}){% endif %}
+                </h2>
+                <div class="flex items-center gap-2 text-xs">
+                    <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort=newest&page=1" class="px-2.5 py-1 rounded {{ 'bg-indigo-600 text-white' if sort == 'newest' else 'bg-slate-800 text-slate-300' }}">Newest</a>
+                    <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort=title_asc&page=1" class="px-2.5 py-1 rounded {{ 'bg-indigo-600 text-white' if sort == 'title_asc' else 'bg-slate-800 text-slate-300' }}">A–Z</a>
+                </div>
+            </div>
+            <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
+                {% for item in items %}
+                    {{ render_card(item) }}
+                {% endfor %}
+            </div>
+            <div class="mt-6 flex items-center justify-between bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl text-xs">
+                <span class="text-slate-400">Showing page {{ page }} of {{ total_pages }}</span>
+                <div class="flex gap-2">
+                    {% if page > 1 %}
+                    <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort={{ sort }}&page={{ page - 1 }}" class="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-200">← Previous Page</a>
+                    {% endif %}
+                    {% if page < total_pages %}
+                    <a href="/?tab=library&media_type={{ media_type or '' }}&q={{ q or '' }}&sort={{ sort }}&page={{ page + 1 }}" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-white font-medium">Next Page →</a>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+
+        {% endif %}
+        {% endif %}
+        {% if active_tab == 'activity' %}
+        <div class="space-y-6">
+            <!-- 30-Day Torrent History: Searched, Downloaded & Blacklisted -->
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl shadow-lg">
+                <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4 mb-4">
+                    <div>
+                        <h2 class="text-lg font-bold text-indigo-300">📜 30-Day Torrent Activity History</h2>
+                        <p class="text-xs text-slate-400">Rolling 30-day log of searched torrents, downloaded/imported releases, and blacklisted torrents</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <input id="hist30-search" type="text" oninput="renderHistory30d()" placeholder="Filter title or query..."
+                               class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                        <button type="button" onclick="loadHistory30d()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium">↻ Refresh</button>
+                    </div>
+                </div>
+
+                <!-- Category Filter Pills -->
+                <div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
+                    <button type="button" onclick="setHist30Filter('all', this)" class="h30-pill px-3 py-1.5 rounded-full bg-indigo-600 text-white font-semibold">
+                        All (<span id="h30-cnt-all">0</span>)
+                    </button>
+                    <button type="button" onclick="setHist30Filter('searched', this)" class="h30-pill px-3 py-1.5 rounded-full bg-slate-800 text-sky-300 hover:bg-slate-700 font-medium">
+                        🔎 Searched (<span id="h30-cnt-searched">0</span>)
+                    </button>
+                    <button type="button" onclick="setHist30Filter('downloaded', this)" class="h30-pill px-3 py-1.5 rounded-full bg-slate-800 text-emerald-300 hover:bg-slate-700 font-medium">
+                        ⬇️ Downloaded / Imported (<span id="h30-cnt-downloaded">0</span>)
+                    </button>
+                    <button type="button" onclick="setHist30Filter('blacklisted', this)" class="h30-pill px-3 py-1.5 rounded-full bg-slate-800 text-rose-300 hover:bg-slate-700 font-medium">
+                        🚫 Blacklisted (<span id="h30-cnt-blacklisted">0</span>)
+                    </button>
+                </div>
+
+                <div id="history-30d-box" class="text-xs text-slate-400">Loading 30-day torrent activity...</div>
+            </div>
+
+            <!-- Live qBittorrent Activity Queue -->
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+                    <div>
+                        <h2 class="text-base font-semibold text-indigo-300">Live qBittorrent Activity Queue</h2>
+                        <p class="text-xs text-slate-400">Active &amp; completed torrents in category <span class="font-mono text-slate-300">{{ cfg.qbit_category }}</span></p>
+                    </div>
+                    <button type="button" onclick="loadActivityTab()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs font-medium">↻ Refresh Queue</button>
+                </div>
+                <div id="activity-queue-box" class="text-xs text-slate-400">Loading qBittorrent queue...</div>
+            </div>
+
+            <!-- Manual Import Scanner -->
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+                    <div>
+                        <h2 class="text-base font-semibold text-indigo-300">Manual Import Scanner</h2>
+                        <p class="text-xs text-slate-400">Scan <span class="font-mono text-slate-300">{{ cfg.qbit_local_mount }}</span> for video files and map them to any library item</p>
+                    </div>
+                    <button type="button" onclick="loadManualImportFiles()" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded text-xs font-medium text-white">Scan Download Mount</button>
+                </div>
+                <div id="manual-import-box" class="text-xs text-slate-400">Click <strong>Scan Download Mount</strong> to list files available for manual import.</div>
+            </div>
+        </div>
+        <script src="/static/js/history30.js" defer></script>
+        {% endif %}
+
+        {% if active_tab == 'calendar' %}
+        <div class="space-y-4">
+            <!-- Header & Month Controls -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                    <h2 class="text-lg font-bold text-indigo-300">📅 {{ cal_month_label }}</h2>
+                    <div class="inline-flex rounded-lg bg-slate-950 border border-slate-800 p-0.5 text-xs">
+                        <a href="/?tab=calendar&cal_month={{ prev_month_str }}" class="px-2.5 py-1 rounded-md text-slate-300 hover:bg-slate-800">◀ Prev</a>
+                        <a href="/?tab=calendar" class="px-2.5 py-1 rounded-md text-indigo-300 hover:bg-slate-800 font-semibold">Today</a>
+                        <a href="/?tab=calendar&cal_month={{ next_month_str }}" class="px-2.5 py-1 rounded-md text-slate-300 hover:bg-slate-800">Next ▶</a>
+                    </div>
+                </div>
+
+                <!-- Media Type & Status Filters -->
+                <div class="flex flex-wrap items-center gap-2 text-[11px]">
+                    <div class="inline-flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+                        <button type="button" data-cal-type="all" onclick="setCalMediaType('all')" class="cal-type-btn px-2.5 py-1 rounded-md bg-indigo-600 text-white font-semibold">All Media</button>
+                        <button type="button" data-cal-type="movie" onclick="setCalMediaType('movie')" class="cal-type-btn px-2.5 py-1 rounded-md text-purple-300 hover:bg-slate-800 font-semibold">🎬 Movies</button>
+                        <button type="button" data-cal-type="tv" onclick="setCalMediaType('tv')" class="cal-type-btn px-2.5 py-1 rounded-md text-sky-300 hover:bg-slate-800 font-semibold">📺 TV Shows</button>
+                    </div>
+                    <span class="text-slate-700">|</span>
+                    <button type="button" data-cal-status="all" onclick="setCalStatusFilter('all')" class="cal-status-btn px-2.5 py-1 rounded-full bg-slate-700 text-white font-semibold">Any Status</button>
+                    <button type="button" data-cal-status="missing" onclick="setCalStatusFilter('missing')" class="cal-status-btn px-2.5 py-1 rounded-full bg-slate-800 text-amber-300 hover:bg-slate-700">⏳ Missing</button>
+                    <button type="button" data-cal-status="available" onclick="setCalStatusFilter('available')" class="cal-status-btn px-2.5 py-1 rounded-full bg-slate-800 text-emerald-300 hover:bg-slate-700">✓ Grabbed</button>
+                    <button type="button" data-cal-status="upcoming" onclick="setCalStatusFilter('upcoming')" class="cal-status-btn px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 hover:bg-slate-700">🗓️ Upcoming</button>
+                    <span class="mx-1 text-slate-700">|</span>
+                    <button type="button" onclick="syncCalendarNow()"
+                            class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white shadow">
+                        🔄 Sync Air Dates
+                    </button>
+                </div>
+            </div>
+
+            <!-- Compact Aired & Missing Strip -->
+            {% set aired_missing = calendar_entries | selectattr('is_past_or_today') | rejectattr('has_file') | list %}
+            {% if aired_missing %}
+            <div class="bg-amber-950/25 border border-amber-700/40 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <span class="font-bold text-amber-300">⚡ Aired &amp; Missing ({{ aired_missing|length }}):</span>
+                    {% for item in aired_missing %}
+                    <span data-cal-kind="{{ item.kind }}" class="cal-aired-pill inline-flex items-center gap-1.5 bg-slate-900 border border-amber-700/40 rounded-lg px-2.5 py-1">
+                        <a href="/media/{{ item.media_id }}" class="font-semibold text-slate-100 hover:text-indigo-300">{{ item.title }}</a>
+                        <span class="text-amber-300 font-mono text-[11px]">{{ item.subtitle.split(' • ')[0] }}</span>
+                        {% if item.kind == 'tv' %}
+                        <button type="button" onclick="huntCalendarEp({{ item.id }}, this)"
+                                class="ml-1 bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded">
+                            🔎 Hunt
+                        </button>
+                        {% endif %}
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- 7-Column Calendar Grid -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+                <div class="hidden md:grid md:grid-cols-7 bg-slate-950/90 border-b border-slate-800 text-center text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    <div class="py-2.5">Sun</div>
+                    <div class="py-2.5">Mon</div>
+                    <div class="py-2.5">Tue</div>
+                    <div class="py-2.5">Wed</div>
+                    <div class="py-2.5">Thu</div>
+                    <div class="py-2.5">Fri</div>
+                    <div class="py-2.5">Sat</div>
+                </div>
+                <div class="divide-y divide-slate-800">
+                    {% for week in calendar_weeks %}
+                    <div class="grid grid-cols-1 md:grid-cols-7 divide-y md:divide-y-0 md:divide-x divide-slate-800">
+                        {% for cell in week %}
+                        <div class="{{ 'hidden md:flex' if not cell.in_month else 'flex' }} min-h-[96px] md:min-h-[160px] lg:min-h-[190px] 2xl:min-h-[220px] p-2.5 flex-col gap-2 {{ 'bg-indigo-950/20 ring-1 ring-inset ring-indigo-500/40' if cell.is_today else ('bg-slate-900/60' if cell.in_month else 'bg-slate-950/50 opacity-60') }}">
+                            <div class="flex items-center justify-between">
+                                <span class="text-xs font-bold {{ 'bg-indigo-600 text-white px-2 py-0.5 rounded-full' if cell.is_today else ('text-slate-200' if cell.in_month else 'text-slate-500') }}">
+                                    {{ cell.day }}
+                                </span>
+                                {% if cell.entries|length > 0 %}
+                                <span class="text-[10px] text-slate-400 font-mono bg-slate-950/80 px-1.5 py-0.5 rounded border border-slate-800">{{ cell.entries|length }}</span>
+                                {% endif %}
+                            </div>
+
+                            <div class="space-y-1.5 overflow-y-auto max-h-[260px] 2xl:max-h-[320px] pr-0.5">
+                                {% for entry in cell.entries %}
+                                {% set pill_state = 'available' if entry.has_file else ('missing' if entry.is_past_or_today else 'upcoming') %}
+                                {% set is_movie = (entry.kind == 'movie') %}
+                                <div data-cal-state="{{ pill_state }}"
+                                     data-cal-kind="{{ entry.kind }}"
+                                     class="cal-pill rounded-lg px-2.5 py-1.5 text-[11px] leading-snug border transition
+                                     {{ 'bg-purple-950/80 border-purple-500/50 text-purple-100' if is_movie else 'bg-sky-950/80 border-sky-500/45 text-sky-100' }}
+                                     {{ 'border-l-4 border-l-emerald-400' if entry.has_file else ('border-l-4 border-l-amber-400' if entry.is_past_or_today else '') }}">
+                                    <div class="flex items-center justify-between gap-1 mb-0.5">
+                                        <span class="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded {{ 'bg-purple-800/70 text-purple-200' if is_movie else 'bg-sky-800/70 text-sky-200' }}">
+                                            {{ '🎬 Movie' if is_movie else '📺 TV' }}
+                                        </span>
+                                        <div class="flex items-center gap-1">
+                                            {% if entry.has_file %}
+                                            <span title="Grabbed / On Disk" class="text-[10px] font-bold text-emerald-300 bg-emerald-950/90 border border-emerald-600/50 px-1.5 rounded">✓</span>
+                                            {% elif entry.is_past_or_today and not is_movie %}
+                                            <button type="button" onclick="huntCalendarEp({{ entry.id }}, this)" title="Hunt Episode Now"
+                                                    class="shrink-0 bg-amber-600 hover:bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.2 rounded">
+                                                Hunt
+                                            </button>
+                                            {% elif entry.is_past_or_today %}
+                                            <span title="Missing" class="text-[10px] font-bold text-amber-300">⏳</span>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <a href="/media/{{ entry.media_id }}" title="{{ entry.title }} — {{ entry.subtitle }}"
+                                       class="block font-semibold truncate hover:underline text-white">
+                                        {{ entry.title }}
+                                    </a>
+                                    <div class="text-[10px] opacity-85 font-mono truncate">
+                                        {{ entry.subtitle }}
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        <script src="/static/js/calendar.js" defer></script>
+        {% endif %}
+
+        {% if active_tab == 'settings' %}
+        <div class="mb-6 bg-slate-900 border border-slate-800 rounded-xl p-4">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div>
+                    <h2 class="text-lg font-bold text-indigo-300">⚙️ Settings &amp; Configuration</h2>
+                    <p class="text-xs text-slate-400">Manage storage drives, quality profiles, indexers, download clients, Plex/metadata connections, and *Arr migrations.</p>
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-1.5 border-t border-slate-800 pt-3 text-xs font-medium">
+                {% set sec_tabs = [
+                    ('media', '💾 Media Management & Drives'),
+                    ('profiles', '🎚️ Profiles & Custom Formats'),
+                    ('indexers', '🔎 Indexers (' ~ indexers|length ~ ')'),
+                    ('clients', '⬇️ Download Clients'),
+                    ('connect', '🔌 Connections'),
+                    ('backup', '💾 Backup & Restore')
+                ] %}
+                {% for skey, slabel in sec_tabs %}
+                <a href="/?tab=settings&section={{ skey }}"
+                   class="px-3.5 py-1.5 rounded-lg transition {{ 'bg-indigo-600 text-white shadow' if settings_section == skey else 'bg-slate-800/80 text-slate-300 hover:bg-slate-700' }}">
+                    {{ slabel }}
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+
+        {% if settings_section == 'media' %}
+        <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                    <h3 class="text-base font-semibold text-indigo-300">🎯 One-Click TRaSH-Guides Scoring Presets</h3>
+                    <span id="trash-preset-msg" class="text-xs text-emerald-400"></span>
+                </div>
+                <p class="text-xs text-slate-400">Install curated regex scoring rules to prioritize HDR10/Dolby Vision, Atmos, and HEVC/AV1 while blocking CAM/TS/hardcoded-sub releases.</p>
+                <div class="flex flex-wrap gap-2 text-xs">
+                    <button type="button" onclick="installTrashPreset('4k_hdr_atmos')" class="bg-purple-950/70 hover:bg-purple-900/70 border border-purple-500/40 text-purple-200 px-3 py-1.5 rounded-lg font-medium">+ 4K HDR10 / DV + Atmos</button>
+                    <button type="button" onclick="installTrashPreset('balanced_1080p_hevc')" class="bg-sky-950/70 hover:bg-sky-900/70 border border-sky-500/40 text-sky-200 px-3 py-1.5 rounded-lg font-medium">+ Balanced 1080p HEVC/x265</button>
+                    <button type="button" onclick="installTrashPreset('block_cam_hc')" class="bg-rose-950/70 hover:bg-rose-900/70 border border-rose-500/40 text-rose-200 px-3 py-1.5 rounded-lg font-medium">+ Block CAM / TS / Hardcoded Subs</button>
+                    <button type="button" onclick="installTrashPreset('prefer_proper_repack')" class="bg-emerald-950/70 hover:bg-emerald-900/70 border border-emerald-500/40 text-emerald-200 px-3 py-1.5 rounded-lg font-medium">+ Prefer Proper / Repack</button>
+                </div>
+            </div>
+            <div class="grid md:grid-cols-2 gap-6">
+            <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
+                <input type="hidden" name="section" value="media">
+                <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">Importing & Naming</h2>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">File Transfer Mode</label>
+                    <select name="import_mode" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                        <option value="hardlink" {{ 'selected' if cfg.import_mode == 'hardlink' }}>Hardlink (Fallback to Copy across drives)</option>
+                        <option value="copy" {{ 'selected' if cfg.import_mode == 'copy' }}>Copy (Keep seed intact on download drive)</option>
+                        <option value="move" {{ 'selected' if cfg.import_mode == 'move' }}>Move (Remove source after transfer)</option>
+                    </select>
+                </div>
+                <label class="flex items-center gap-2.5 text-sm text-slate-300 pt-1">
+                    <input type="checkbox" name="remove_completed_download" value="true" {{ 'checked' if cfg.remove_completed_download == 'true' }}>
+                    <span>Completed Download Handling: Remove torrent & data from qBittorrent after import</span>
+                </label>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Minimum Free Space per Drive (GB)</label>
+                    <input type="number" name="min_free_space_gb" value="{{ cfg.min_free_space_gb }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Movie Folder Format</label>
+                    <input type="text" name="movie_folder_format" value="{{ cfg.movie_folder_format }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">TV Show Folder Format</label>
+                    <input type="text" name="tv_folder_format" value="{{ cfg.tv_folder_format }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                </div>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save Media Settings</button>
+            </form>
+
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-3">
+                <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">Bound Plex Drive Pool</h2>
+                <div class="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
+                    {% for d in drives %}
+                    <div class="bg-slate-800/60 p-2.5 rounded border border-slate-800">
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="font-mono text-slate-200">{{ d.mount }}</span>
+                            <span class="text-slate-400">{{ d.free_gb }} GB free / {{ d.total_gb }} GB</span>
+                        </div>
+                        <div class="w-full bg-slate-700 h-1.5 rounded-full overflow-hidden">
+                            <div class="bg-indigo-500 h-full" style="width: {{ d.used_pct }}%"></div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+                <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-3">
+                <div class="border-b border-slate-800 pb-2">
+                    <h2 class="text-lg font-semibold text-indigo-300">Background Automation Controls</h2>
+                    <p class="text-xs text-slate-400">Turn background jobs on or off when you just want to browse your library or perform maintenance.</p>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <label class="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-lg p-3 cursor-pointer">
+                        <div>
+                            <div class="font-semibold text-slate-100">Master Automation</div>
+                            <div class="text-slate-400">Global switch for all scheduled background tasks</div>
+                        </div>
+                        <input type="checkbox" name="automation_enabled" value="true" onchange="toggleAutomationSetting('automation_enabled', this.checked)" class="w-4 h-4 accent-indigo-500"
+                               {{ 'checked' if cfg.get('automation_enabled', 'true')|lower != 'false' else '' }}>
+                    </label>
+                    <label class="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-lg p-3 cursor-pointer">
+                        <div>
+                            <div class="font-semibold text-slate-100">Auto Download &amp; Import</div>
+                            <div class="text-slate-400">Poll download client and import completed files</div>
+                        </div>
+                        <input type="checkbox" name="auto_import_enabled" value="true" onchange="toggleAutomationSetting('auto_import_enabled', this.checked)" class="w-4 h-4 accent-indigo-500"
+                               {{ 'checked' if cfg.get('auto_import_enabled', 'true')|lower != 'false' else '' }}>
+                    </label>
+                    <label class="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-lg p-3 cursor-pointer">
+                        <div>
+                            <div class="font-semibold text-slate-100">Auto Hunt (Calendar &amp; Wanted)</div>
+                            <div class="text-slate-400">Search Prowlarr and grab wanted/aired releases</div>
+                        </div>
+                        <input type="checkbox" name="auto_hunt_enabled" value="true" onchange="toggleAutomationSetting('auto_hunt_enabled', this.checked)" class="w-4 h-4 accent-indigo-500"
+                               {{ 'checked' if cfg.get('auto_hunt_enabled', 'true')|lower != 'false' else '' }}>
+                    </label>
+                    <label class="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-lg p-3 cursor-pointer">
+                        <div>
+                            <div class="font-semibold text-slate-100">Auto Quality Upgrades</div>
+                            <div class="text-slate-400">Automatically search for higher-tier upgrades</div>
+                        </div>
+                        <input type="checkbox" name="auto_upgrade_enabled" value="true" onchange="toggleAutomationSetting('auto_upgrade_enabled', this.checked)" class="w-4 h-4 accent-indigo-500"
+                               {{ 'checked' if cfg.get('auto_upgrade_enabled', 'true')|lower != 'false' else '' }}>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Root Folders Editor -->
+        <div class="mt-6 bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
+            <div class="border-b border-slate-800 pb-2">
+                <h2 class="text-lg font-semibold text-indigo-300">Root Folders</h2>
+                <p class="text-xs text-slate-400">Configure destination folders for Movies, TV Shows, and Music. When multiple folders exist for a type, OmniArr imports to the drive with the most free space.</p>
+            </div>
+
+            <form id="add-root-form" action="/settings/roots/add" method="post" class="flex flex-wrap gap-3 items-end bg-slate-800/40 p-3.5 rounded-lg border border-slate-800">
+                <div class="w-36">
+                    <label class="block text-xs text-slate-400 mb-1">Media Type</label>
+                    <select name="media_type" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                        <option value="movie">Movies</option>
+                        <option value="tv">TV Shows</option>
+                        <option value="music">Music</option>
+                    </select>
+                </div>
+                <div class="flex-1 min-w-[240px]">
+                    <label class="block text-xs text-slate-400 mb-1">Directory Path</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="root-path-input" name="path" required placeholder="Click Browse Drives or type path..."
+                               class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                        <button type="button" onclick="openFolderBrowser()"
+                                class="bg-slate-700 hover:bg-slate-600 border border-slate-600 px-3 py-2 rounded text-xs font-semibold text-indigo-300 whitespace-nowrap">
+                            📂 Browse Drives
+                        </button>
+                    </div>
+                </div>
+                <label class="flex items-center gap-2 text-xs text-slate-300 pb-2.5">
+                    <input type="checkbox" name="create_dir" value="true" checked class="rounded bg-slate-800 border-slate-700 text-indigo-500">
+                    <span>Create if missing</span>
+                </label>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">
+                    + Add Root Folder
+                </button>
+            </form>
+
+            <div class="space-y-3 mt-4">
+                {% set rf_groups = [
+                    ('movie', '🎬 Movies'),
+                    ('tv', '📺 TV Shows'),
+                    ('music', '🎵 Music')
+                ] %}
+                {% for gtype, glabel in rf_groups %}
+                {% set gfolders = root_folders | selectattr('media_type', 'equalto', gtype) | list %}
+                <details class="bg-slate-950/70 border border-slate-800 rounded-xl overflow-hidden group">
+                    <summary class="flex items-center justify-between px-4 py-3 cursor-pointer select-none hover:bg-slate-800/50 transition">
+                        <div class="flex items-center gap-2.5">
+                            <span class="text-slate-400 text-xs transition-transform group-open:rotate-90">▶</span>
+                            <span class="font-semibold text-sm text-slate-100">{{ glabel }}</span>
+                            <span class="text-xs text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-0.5 rounded-full">
+                                {{ gfolders|length }} folder{{ 's' if gfolders|length != 1 else '' }}
+                            </span>
+                        </div>
+                        <span class="text-xs text-indigo-400 group-open:hidden">Click to expand</span>
+                        <span class="text-xs text-slate-400 hidden group-open:inline">Click to collapse</span>
+                    </summary>
+                    <div class="border-t border-slate-800">
+                        {% if gfolders %}
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-slate-900/90 text-slate-400 uppercase text-[11px]">
+                                <tr>
+                                    <th class="px-4 py-2.5">Directory Path</th>
+                                    <th class="px-4 py-2.5">Status &amp; Free Space</th>
+                                    <th class="px-4 py-2.5 text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-800/80">
+                                {% for rf in gfolders %}
+                                <tr class="hover:bg-slate-800/40 transition">
+                                    <td class="px-4 py-2.5 font-mono text-slate-200">{{ rf.path }}</td>
+                                    <td class="px-4 py-2.5">
+                                        {% if rf.accessible is not defined or rf.accessible %}
+                                        <span class="inline-flex items-center gap-1 bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 px-2.5 py-0.5 rounded-full text-[11px]">
+                                            ✓ Accessible ({{ rf.free_gb }} GB free)
+                                        </span>
+                                        {% else %}
+                                        <span class="inline-flex items-center gap-1 bg-rose-950/80 text-rose-300 border border-rose-800/60 px-2.5 py-0.5 rounded-full text-[11px]">
+                                            ✕ Unreachable
+                                        </span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="px-4 py-2.5 text-right">
+                                        <form action="/settings/roots/delete" method="post" class="inline">
+                                    <input type="hidden" name="media_type" value="{{ rf.media_type }}">
+                                    <input type="hidden" name="path" value="{{ rf.path }}">
+                                    <button type="submit" class="text-rose-400 hover:text-rose-300">Remove</button>
+                                </form>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        {% else %}
+                        <p class="px-4 py-3 text-xs text-slate-500">No root folders configured for {{ glabel }} yet.</p>
+                        {% endif %}
+                    </div>
+                </details>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if settings_section == 'profiles' %}
+        <div class="space-y-6 max-w-4xl">
+            <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
+                <input type="hidden" name="section" value="profiles">
+                <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">Quality Defaults & Release Filters</h2>
+                <div class="grid sm:grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Default Movie Profile</label>
+                        <select name="default_movie_quality" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                            {% for p in profiles %}<option value="{{ p.name }}" {{ 'selected' if cfg.default_movie_quality == p.name }}>{{ p.name }}</option>{% endfor %}
+                            {% for q in ['2160p', '1080p', '720p', 'any'] %}<option value="{{ q }}" {{ 'selected' if cfg.default_movie_quality == q }}>{{ q }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Default TV Profile</label>
+                        <select name="default_tv_quality" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                            {% for p in profiles %}<option value="{{ p.name }}" {{ 'selected' if cfg.default_tv_quality == p.name }}>{{ p.name }}</option>{% endfor %}
+                            {% for q in ['2160p', '1080p', '720p', 'any'] %}<option value="{{ q }}" {{ 'selected' if cfg.default_tv_quality == q }}>{{ q }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Default Music Quality</label>
+                        <select name="default_music_quality" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                            {% for q in ['lossless', 'any'] %}<option value="{{ q }}" {{ 'selected' if cfg.default_music_quality == q }}>{{ q }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Minimum Seeders Required</label>
+                        <input type="number" name="min_seeders" value="{{ cfg.min_seeders }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Minimum Release Size (GB)</label>
+                        <input type="number" step="0.1" name="min_size_gb" value="{{ cfg.min_size_gb or 0 }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Maximum Release Size (GB)</label>
+                        <input type="number" step="0.5" name="max_size_gb" value="{{ cfg.max_size_gb }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Preferred Release Keywords (+50 score each)</label>
+                    <input type="text" name="preferred_keywords" value="{{ cfg.preferred_keywords }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Must Not Contain / Blocked Terms</label>
+                    <input type="text" name="blocked_keywords" value="{{ cfg.blocked_keywords }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono text-rose-300">
+                </div>
+                <div class="border-t border-slate-800 pt-4 mt-2 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <h3 class="text-sm font-bold text-indigo-300">🤖 Automated Hunting &amp; Quality Cutoff Upgrades</h3>
+                        <button type="button" onclick="runAutomationNow(this)" class="bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/40 text-emerald-300 px-3 py-1 rounded text-xs font-semibold">⚡ Run Hunt Now</button>
+                    </div>
+                    <div class="grid sm:grid-cols-2 gap-3 text-xs">
+                        <label class="flex items-center gap-2.5 bg-slate-950 border border-slate-800 rounded-lg p-3 cursor-pointer">
+                            <input type="checkbox" name="auto_hunt_enabled" value="true" {{ 'checked' if cfg.auto_hunt_enabled != 'false' }} class="w-4 h-4 accent-indigo-500">
+                            <span>
+                                <strong class="block text-slate-200">Auto-Hunt Aired Calendar &amp; Wanted</strong>
+                                <span class="text-slate-400">Automatically search &amp; grab released episodes/movies every 2 min</span>
+                            </span>
+                        </label>
+                        <label class="flex items-center gap-2.5 bg-slate-950 border border-slate-800 rounded-lg p-3 cursor-pointer">
+                            <input type="checkbox" name="auto_upgrade_enabled" value="true" {{ 'checked' if cfg.auto_upgrade_enabled == 'true' }} class="w-4 h-4 accent-indigo-500">
+                            <span>
+                                <strong class="block text-slate-200">Auto Quality-Cutoff Upgrades</strong>
+                                <span class="text-slate-400">Upgrade 1080p files to 4K/2160p when profile cutoff allows</span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save Profiles &amp; Automation</button>
+            </form>
+
+            <div class="grid md:grid-cols-2 gap-6">
+                <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
+                    <h3 class="text-base font-semibold text-indigo-300 border-b border-slate-800 pb-2 mb-3">Imported Quality Profiles ({{ profiles|length }})</h3>
+                    <ul class="space-y-2 text-xs">
+                        {% for p in profiles %}
+                        <li class="bg-slate-800/60 border border-slate-800 p-2.5 rounded flex justify-between">
+                            <span class="font-medium text-slate-200">{{ p.name }}</span>
+                            <span class="text-slate-400 uppercase">{{ p.source_app }} • Min Score: {{ p.min_format_score }}</span>
+                        </li>
+                        {% else %}
+                        <li class="text-slate-400">Upload your Sonarr or Radarr backup .zip to import custom profiles.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
+                    <h3 class="text-base font-semibold text-indigo-300 border-b border-slate-800 pb-2 mb-3">Imported Custom Formats ({{ custom_formats|length }})</h3>
+                    <ul class="space-y-2 text-xs max-h-64 overflow-y-auto pr-1">
+                        {% for cf in custom_formats %}
+                        <li class="bg-slate-800/60 border border-slate-800 p-2.5 rounded flex justify-between">
+                            <span class="font-medium text-slate-200">{{ cf.name }}</span>
+                            <span class="text-slate-400 uppercase">{{ cf.source_app }}</span>
+                        </li>
+                        {% else %}
+                        <li class="text-slate-400">Custom regex formats from Sonarr & Radarr appear here automatically on import.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if settings_section == 'indexers' %}
+        <div class="space-y-6 max-w-4xl">
+            <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
+                <input type="hidden" name="section" value="indexers">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+                    <h2 class="text-lg font-semibold text-indigo-300">Prowlarr Connection</h2>
+                    <button type="button" onclick="testConn('prowlarr')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">Test Prowlarr</button>
+                </div>
+                <div id="test-prowlarr" class="text-xs text-slate-400"></div>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Prowlarr URL</label>
+                        <input type="text" name="prowlarr_url" value="{{ cfg.prowlarr_url }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Prowlarr API Key</label>
+                        <input type="text" name="prowlarr_api_key" value="{{ cfg.prowlarr_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                </div>
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save Prowlarr Config</button>
+            </form>
+
+            <form action="/settings/indexers" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4">
+                <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">Imported Indexers</h2>
+                <div class="grid sm:grid-cols-2 gap-3">
+                    {% for idx in indexers %}
+                    <div class="flex items-center justify-between bg-slate-800/60 border border-slate-800 px-3 py-2 rounded">
+                        <label class="flex items-center gap-2.5 text-sm">
+                            <input type="checkbox" name="enabled_{{ idx.id }}" value="1" {{ 'checked' if idx.enabled }}>
+                            <span>{{ idx.name }}</span>
+                            <span class="text-[11px] text-slate-500">({{ idx.implementation }})</span>
+                        </label>
+                        <input type="number" name="priority_{{ idx.id }}" value="{{ idx.priority }}" class="w-16 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-center">
+                    </div>
+                    {% endfor %}
+                </div>
+                {% if indexers %}<button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save Indexer States</button>{% endif %}
+            </form>
+        </div>
+        {% endif %}
+
+        {% if settings_section == 'clients' %}
+        <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-lg space-y-4 max-w-3xl">
+            <input type="hidden" name="section" value="clients">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+                <h2 class="text-lg font-semibold text-indigo-300">qBittorrent & Remote Path Mappings</h2>
+                <button type="button" onclick="testConn('qbittorrent')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">Test qBittorrent</button>
+            </div>
+            <div id="test-qbittorrent" class="text-xs text-slate-400"></div>
+            <div class="grid sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">qBittorrent URL</label>
+                    <input type="text" name="qbit_url" value="{{ cfg.qbit_url }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Category</label>
+                    <input type="text" name="qbit_category" value="{{ cfg.qbit_category }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Username</label>
+                    <input type="text" name="qbit_user" value="{{ cfg.qbit_user }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Password</label>
+                    <input type="password" name="qbit_pass" value="{{ cfg.qbit_pass }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                </div>
+            </div>
+            <div class="border-t border-slate-800 pt-4">
+                <h3 class="text-sm font-semibold text-slate-300 mb-3">Remote Path Mapping</h3>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Remote Path (Windows / UNC Marker)</label>
+                        <input type="text" name="qbit_remote_path" value="{{ cfg.qbit_remote_path }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Local Path (LXC Mount)</label>
+                        <input type="text" name="qbit_local_mount" value="{{ cfg.qbit_local_mount }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                </div>
+            </div>
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save Download Client</button>
+        </form>
+        {% endif %}
+
+        {% if settings_section == 'connect' %}
+        <form action="/settings" method="post" class="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-6 max-w-6xl">
+            <input type="hidden" name="section" value="connect">
+
+            <!-- Plex Connection -->
+            <div>
+                <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
+                    <h2 class="text-lg font-semibold text-indigo-300">Plex Media Server</h2>
+                    <button type="button" onclick="testConn('plex')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">Test Plex</button>
+                </div>
+                <div id="test-plex" class="text-xs text-slate-400 mb-2"></div>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Plex URL</label>
+                        <input type="text" name="plex_url" value="{{ cfg.plex_url }}" placeholder="http://localhost:32400" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">X-Plex-Token</label>
+                        <div class="flex gap-1.5">
+                            <input type="password" id="input-plex-token" name="plex_token" value="{{ cfg.plex_token }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                            <button type="button" onclick="toggleSecret('input-plex-token')" title="Show/Hide Token"
+                                    class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 rounded text-xs text-slate-300">👁</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-6 mt-3 text-sm text-slate-300">
+                    <label class="flex items-center gap-2"><input type="checkbox" name="plex_notify_grab" value="true" {{ 'checked' if cfg.plex_notify_grab == 'true' }}><span>On Grab</span></label>
+                    <label class="flex items-center gap-2"><input type="checkbox" name="plex_notify_import" value="true" {{ 'checked' if cfg.plex_notify_import == 'true' }}><span>On Import / Upgrade</span></label>
+                </div>
+            </div>
+
+            <!-- Jellyfin Connection -->
+            <div class="border-t border-slate-800 pt-5">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
+                    <h2 class="text-lg font-semibold text-indigo-300">Jellyfin Media Server</h2>
+                    <button type="button" onclick="testConn('jellyfin')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">Test Jellyfin</button>
+                </div>
+                <div id="test-jellyfin" class="text-xs text-slate-400 mb-2"></div>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Jellyfin URL</label>
+                        <input type="text" name="jellyfin_url" value="{{ cfg.jellyfin_url }}" placeholder="http://localhost:8096" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Jellyfin API Key</label>
+                        <div class="flex gap-1.5">
+                            <input type="password" id="input-jellyfin-key" name="jellyfin_api_key" value="{{ cfg.jellyfin_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                            <button type="button" onclick="toggleSecret('input-jellyfin-key')" title="Show/Hide Key"
+                                    class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 rounded text-xs text-slate-300">👁</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-6 mt-3 text-sm text-slate-300">
+                    <label class="flex items-center gap-2"><input type="checkbox" name="jellyfin_notify" value="true" {{ 'checked' if cfg.jellyfin_notify == 'true' }}><span>Refresh Library on Grab / Import</span></label>
+                </div>
+            </div>
+
+            <!-- Emby Connection -->
+            <div class="border-t border-slate-800 pt-5">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-3">
+                    <h2 class="text-lg font-semibold text-indigo-300">Emby Media Server</h2>
+                    <button type="button" onclick="testConn('emby')" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded text-xs">Test Emby</button>
+                </div>
+                <div id="test-emby" class="text-xs text-slate-400 mb-2"></div>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Emby URL</label>
+                        <input type="text" name="emby_url" value="{{ cfg.emby_url }}" placeholder="http://localhost:8096" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Emby API Key</label>
+                        <div class="flex gap-1.5">
+                            <input type="password" id="input-emby-key" name="emby_api_key" value="{{ cfg.emby_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                            <button type="button" onclick="toggleSecret('input-emby-key')" title="Show/Hide Key"
+                                    class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2.5 rounded text-xs text-slate-300">👁</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-6 mt-3 text-sm text-slate-300">
+                    <label class="flex items-center gap-2"><input type="checkbox" name="emby_notify" value="true" {{ 'checked' if cfg.emby_notify == 'true' }}><span>Refresh Library on Grab / Import</span></label>
+                </div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-slate-800">
+                <h4 class="text-xs font-bold uppercase tracking-wider text-amber-300 mb-3">📊 Tautulli &amp; Metadata Enrichment Keys</h4>
+                <div class="grid sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Tautulli URL</label>
+                        <input type="text" name="tautulli_url" placeholder="http://tautulli:8181" value="{{ cfg.tautulli_url }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Tautulli API Key</label>
+                        <input type="password" name="tautulli_api_key" value="{{ cfg.tautulli_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">TMDB API Key (Franchises, Cast &amp; Reviews)</label>
+                        <input type="password" name="tmdb_api_key" value="{{ cfg.tmdb_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">OMDb API Key (IMDb &amp; Rotten Tomatoes Scores)</label>
+                        <input type="password" name="omdb_api_key" value="{{ cfg.omdb_api_key }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Seerr & General Security -->
+            <div class="border-t border-slate-800 pt-5">
+                <h2 class="text-lg font-semibold text-indigo-300 mb-3">General & Seerr API Security</h2>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">OmniArr API Key (Use this in Seerr)</label>
+                    <div class="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                        <div class="relative flex-1 min-w-[220px]">
+                            <input id="omniarr-api-key-input" type="password" name="omniarr_api_key" value="{{ cfg.omniarr_api_key }}"
+                                   class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 pr-9 text-sm font-mono">
+                            <button type="button" onclick="const inp=document.getElementById('omniarr-api-key-input'); inp.type = inp.type === 'password' ? 'text' : 'password';"
+                                    title="Show / Hide API Key"
+                                    class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs">👁</button>
+                        </div>
+                        <button type="button" onclick="const el=document.getElementById('omniarr-api-key-input'); const orig=el.type; el.type='text'; el.select(); document.execCommand('copy'); el.type=orig; window.getSelection().removeAllRanges(); this.textContent='✓ Copied'; setTimeout(()=>this.textContent='📋 Copy', 1500);"
+                                class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2 rounded text-xs font-medium text-slate-200 whitespace-nowrap">📋 Copy</button>
+                        <button type="submit" formaction="/api/settings/rotate-key" formmethod="post"
+                                onclick="return confirm('Generate a brand-new OmniArr API Key? Any connected apps like Seerr will need the updated key.');"
+                                class="bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 px-3 py-2 rounded text-xs font-medium whitespace-nowrap">↻ Rotate Key</button>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mt-1.5">Paste your own custom key and click Save below, or click <strong>↻ Rotate Key</strong> to generate a new 32-character token immediately.</p>
+                    <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-slate-800/80">
+                        <button type="button" onclick="copySeerrBundle(this)"
+                                class="bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 px-3 py-1.5 rounded text-xs font-medium">
+                            📋 Copy Seerr Connection Info
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save General & Connect Settings</button>
+        </form>
+        
+
+        {% endif %}
+
+        {% if settings_section == 'backup' %}
+        <div class="space-y-6 max-w-6xl">
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl">
+                <h2 class="text-lg font-semibold text-indigo-300 mb-1">💾 Database &amp; Settings Backups</h2>
+                <p class="text-xs text-slate-400 mb-4">Download a consistent snapshot of your SQLite database or export your saved settings as JSON.</p>
+                <div class="flex flex-wrap items-center gap-3">
+                    <a href="/api/settings/backup"
+                       class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-2 rounded-lg text-xs font-medium">
+                        💾 Download Database Backup (.db)
+                    </a>
+                    <a href="/api/settings/export"
+                       class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-2 rounded-lg text-xs font-medium">
+                        📤 Export Settings (.json)
+                    </a>
+                </div>
+            </div>
+        <div class=\"bg-slate-900 border border-slate-800 p-5 rounded-xl\"">
+            <h3 class="text-base font-bold text-indigo-300 mb-1">📦 Migrate from *Arr Backup</h3>
+            <p class="text-xs text-slate-400 mb-3">Import existing libraries, quality profiles, and indexers from a Sonarr, Radarr, Lidarr, or Prowlarr <code class="text-slate-200">.zip</code> backup.</p>
+            <form action="/import-backup" method="post" enctype="multipart/form-data" class="flex flex-wrap items-center gap-3">
+                <input type="file" name="backup_file" accept=".zip" required
+                       class="text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700">
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-1.5 rounded-lg text-xs font-semibold text-white">
+                    Import Backup
+                </button>
+            </form>
+            <div class="mt-5 pt-5 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <h4 class="text-sm font-semibold text-slate-200 mb-1">Restore Settings (.json)</h4>
+                    <p class="text-xs text-slate-400 mb-2">Restore saved OmniArr settings from a previously exported JSON file.</p>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <input type="file" id="restoreSettingsFile" accept=".json,application/json"
+                               class="text-xs text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700">
+                        <button type="button" onclick="restoreSettingsJson()"
+                                class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-medium">
+                            📥 Restore Settings
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <h4 class="text-sm font-semibold text-slate-200 mb-1">Restore Database (.db)</h4>
+                    <p class="text-xs text-slate-400 mb-2">Creates a safety copy first and replaces the SQLite DB. Restart <code class="text-slate-200">omniarr.service</code> after restoring.</p>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <input type="file" id="restoreDbFile" accept=".db,application/octet-stream"
+                               class="text-xs text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700">
+                        <button type="button" onclick="restoreDatabaseFile()"
+                                class="bg-amber-700/40 hover:bg-amber-700/60 border border-amber-500/40 text-amber-200 px-3 py-1.5 rounded-lg text-xs font-medium">
+                            ♻️ Restore DB
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <script>
+            async function restoreSettingsJson() {
+                const inp = document.getElementById("restoreSettingsFile");
+                if (!inp || !inp.files.length) return alert("Choose a .json settings file first.");
+                const fd = new FormData();
+                fd.append("settings_file", inp.files[0]);
+                const res = await fetch("/api/settings/import", { method: "POST", body: fd });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) return alert(data.detail || "Failed to restore settings.");
+                alert("Settings restored (" + (data.imported_keys || 0) + " keys). Reloading...");
+                window.location.reload();
+            }
+            async function restoreDatabaseFile() {
+                const inp = document.getElementById("restoreDbFile");
+                if (!inp || !inp.files.length) return alert("Choose a .db backup file first.");
+                if (!confirm("Replace the current OmniArr database with this backup? A pre-restore safety copy will be kept.")) return;
+                const fd = new FormData();
+                fd.append("db_file_upload", inp.files[0]);
+                const res = await fetch("/api/settings/restore-db", { method: "POST", body: fd });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) return alert(data.detail || "Failed to restore database.");
+                alert("Database restored. Restart omniarr.service on the server to reload all connections.");
+            }
+            </script>
+        </div>
+        </div>
+        {% endif %}
+        {% endif %}
+
+        {% if active_tab in ('history', 'activity_logs') %}
+        <div class="space-y-6">
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+                    <div>
+                        <h2 class="text-lg font-semibold text-indigo-300">Audit Trail &amp; Activity History</h2>
+                        <p class="text-xs text-slate-400">Recent grabs, imports, cross-drive folder moves, disk scans, and blacklisted releases</p>
+                    </div>
+                    <button type="button" onclick="loadHistoryAndLogs()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded text-xs">↻ Refresh</button>
+                </div>
+                <div id="history-events-box" class="text-xs text-slate-400">Loading history events...</div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-lg">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-3">
+                    <h2 class="text-base font-semibold text-emerald-300">Live Service Logs (journalctl -u omniarr)</h2>
+                    <button type="button" onclick="loadHistoryAndLogs()" class="text-xs text-slate-400 hover:text-white">Reload Tail</button>
+                </div>
+                <pre id="system-logs-pre" class="bg-slate-950 border border-slate-800 rounded-lg p-3.5 text-[11px] font-mono text-slate-300 overflow-x-auto max-h-96 whitespace-pre-wrap">Loading service logs...</pre>
+            </div>
+        </div>
+        {% endif %}
+
+    <!-- Interactive Manual Search Modal -->
+    <div id="manual-search-modal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl">
+            <div class="p-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h3 id="ms-modal-title" class="text-base font-semibold text-indigo-300">Manual Release Search</h3>
+                    <p class="text-[11px] text-slate-400">Sorted by OmniArr Score (Seeders + Custom Formats + Preferred Keywords)</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input id="ms-custom-query" type="text" placeholder="Custom search override (e.g. S01E01)..."
+                           class="bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-xs text-slate-200 w-56">
+                    <button type="button" onclick="runManualSearchQuery()" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-xs font-medium">Search</button>
+                    <button type="button" onclick="closeManualSearch()" class="text-slate-400 hover:text-white text-sm px-2">✕</button>
+                </div>
+            </div>
+            <div id="ms-modal-body" class="p-4 overflow-y-auto flex-1 text-xs">
+                <div class="text-slate-400 text-center py-8">Querying Prowlarr indexers...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/manual-search.js" defer></script>
+
+    <div id="bulk-move-bar" class="hidden fixed bottom-5 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 border border-indigo-500/60 shadow-2xl rounded-2xl px-5 py-3 flex items-center gap-3 backdrop-blur">
+        <span id="bulk-move-count" class="text-xs font-bold text-indigo-300">0 selected</span>
+        <select id="bulk-move-target" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100">
+            <option value="">Choose destination root drive...</option>
+            {% for rf in root_folders %}
+            <option value="{{ rf.path }}">{{ rf.path }} ({{ rf.media_type }})</option>
+            {% endfor %}
+        </select>
+        <button type="button" onclick="executeBulkMove()" class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white">🚚 Move Selected</button>
+        <button type="button" onclick="clearBulkSelection()" class="text-xs text-slate-400 hover:text-slate-200 px-2">Clear</button>
+    </div>
+                {% if active_tab == 'tautulli' %}
+        <div class="space-y-6">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-lg font-bold text-amber-300">📺 Tautulli Watch Analytics, Live Streams &amp; Cleanup</h2>
+                    <p class="text-xs text-slate-400">Real-time Plex playback sessions, 30-day top watched leaderboards, recent watch history, and unwatched stale media.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <a href="/?tab=settings&section=connect" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3.5 py-2 rounded-lg text-xs font-medium">
+                        ⚙️ Connection Settings
+                    </a>
+                    <button type="button" onclick="loadDedicatedTautulliTab()" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg text-xs font-semibold">
+                        ↻ Refresh Tautulli
+                    </button>
+                </div>
+            </div>
+
+            <div id="tautulli-tab-status"></div>
+
+            <!-- Live Active Streams -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+                    <h3 class="text-sm font-bold text-amber-300">🔴 Live Active Streams</h3>
+                    <span id="tt-live-bw" class="text-xs font-mono text-slate-400"></span>
+                </div>
+                <div id="tt-live-grid" class="grid md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs text-slate-400">
+                    Loading active streams...
+                </div>
+            </div>
+
+            <!-- 30-Day Top Watched Stats -->
+            <div class="grid lg:grid-cols-3 gap-6">
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                    <h3 class="text-sm font-bold text-indigo-300 border-b border-slate-800 pb-2.5 mb-3">🎬 Top Movies (30 Days)</h3>
+                    <div id="tt-top-movies" class="space-y-2 text-xs text-slate-400">Loading...</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                    <h3 class="text-sm font-bold text-emerald-300 border-b border-slate-800 pb-2.5 mb-3">📺 Top TV Shows (30 Days)</h3>
+                    <div id="tt-top-tv" class="space-y-2 text-xs text-slate-400">Loading...</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                    <h3 class="text-sm font-bold text-amber-300 border-b border-slate-800 pb-2.5 mb-3">👥 Top Viewers (30 Days)</h3>
+                    <div id="tt-top-users" class="space-y-2 text-xs text-slate-400">Loading...</div>
+                </div>
+            </div>
+
+            <!-- Recent Watch History -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <h3 class="text-sm font-bold text-indigo-300 border-b border-slate-800 pb-3 mb-4">🕒 Recent Watch History</h3>
+                <div id="tt-recent-history" class="overflow-x-auto text-xs text-slate-400">Loading watch history...</div>
+            </div>
+
+            <!-- Stale Media Cleanup -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-4">
+                    <div>
+                        <h3 class="text-sm font-bold text-rose-300">🧹 Stale Media Cleanup (Unwatched 12+ Months)</h3>
+                        <p class="text-xs text-slate-400">Available library items with zero plays or no plays in the past 365 days.</p>
+                    </div>
+                    <span id="tt-stale-count" class="text-xs font-mono text-slate-400"></span>
+                </div>
+                <div id="tt-dedicated-stale" class="overflow-x-auto text-xs text-slate-400">Loading stale media report...</div>
+            </div>
+        </div>
+        {% endif %}
+
+{% if active_tab == 'collections' %}
+        <div class="space-y-6">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-lg font-bold text-indigo-300">🎞️ Custom Collections &amp; Franchise Tracker</h2>
+                    <p class="text-xs text-slate-400">Automatically tracks movie trilogies, sagas, and Plex collections—showing missing sequels ready to grab in one click.</p>
+                </div>
+                <button type="button" onclick="loadFranchiseCollections(true)" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-semibold">
+                    ↻ Scan Franchises &amp; Collections
+                </button>
+            </div>
+            <div id="collections-grid" class="grid md:grid-cols-2 gap-5">
+                <div class="col-span-full text-center py-12 text-xs text-slate-400 bg-slate-900 border border-slate-800 rounded-2xl">
+                    Scanning Plex collections &amp; TMDB franchises...
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if active_tab == 'health' %}
+        <div class="space-y-6">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-lg font-bold text-indigo-300">📊 Library Health, Codec &amp; Storage Auditor</h2>
+                    <p class="text-xs text-slate-400">Inspect H.264 vs. HEVC/AV1 codecs for Tdarr transcoding, catch duplicate files &amp; orphaned downloads, and review Tautulli unwatched media.</p>
+                </div>
+                <button type="button" onclick="loadHealthAndTautulli(true)" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-semibold">
+                    ↻ Run Full Audit
+                </button>
+            </div>
+
+            <!-- Codec & Resolution Breakdown Cards -->
+            <div id="health-summary-cards" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 text-slate-400">Scanning codecs &amp; resolutions...</div>
+            </div>
+
+            <!-- Large H.264 Files Ready for Tdarr Transcoding -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <h3 class="text-sm font-bold text-indigo-300 mb-1">⚡ Large H.264 Files (Prime Tdarr Transcode Candidates)</h3>
+                <p class="text-xs text-slate-400 mb-4">Available files over 2 GB encoded in H.264/AVC that can save 40–60% disk space when converted to HEVC/AV1.</p>
+                <div id="health-h264-table" class="overflow-x-auto text-xs text-slate-400">Scanning...</div>
+            </div>
+
+            <!-- Duplicate Library Files & Orphaned Downloads -->
+            <div class="grid lg:grid-cols-2 gap-6">
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                    <h3 class="text-sm font-bold text-amber-300 mb-1">👯 Duplicate Video Files</h3>
+                    <p class="text-xs text-slate-400 mb-4">Movie folders containing multiple video files.</p>
+                    <div id="health-duplicates-list" class="space-y-2.5 text-xs text-slate-400">Scanning...</div>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                    <h3 class="text-sm font-bold text-rose-300 mb-1">🧹 Orphaned Downloads</h3>
+                    <p class="text-xs text-slate-400 mb-4">Video files in your download mount not linked to any library item.</p>
+                    <div id="health-orphans-list" class="space-y-2.5 text-xs text-slate-400">Scanning...</div>
+                </div>
+            </div>
+
+            <!-- Tautulli Unwatched / Stale Media Cleanup -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <h3 class="text-sm font-bold text-amber-300 mb-1">📺 Tautulli Watch History &amp; Stale Media (Unwatched 12+ Months)</h3>
+                <p class="text-xs text-slate-400 mb-4">Available movies and TV shows with zero plays or no plays in the past 365 days.</p>
+                <div id="tautulli-stale-list" class="overflow-x-auto text-xs text-slate-400">Checking Tautulli watch history...</div>
+            </div>
+        </div>
+        {% endif %}
+
+    <script src="/static/js/bulk-ops.js" defer></script>
+
+    <script src="/static/js/grid-controls.js" defer></script>
+
+    <script src="/static/js/ui-shell.js" defer></script>
+
+
+    <!-- Floating Bulk Library Batch Bar -->
+    <div id="omni-bulk-bar" class="hidden fixed bottom-12 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 backdrop-blur-md border border-indigo-500/60 shadow-2xl rounded-2xl px-4 py-3 flex flex-wrap items-center gap-2.5 text-xs max-w-[95vw]">
+        <span class="font-bold text-indigo-300"><span id="omni-bulk-count">0</span> selected</span>
+        <button type="button" onclick="selectAllVisibleBulk()" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">Select All Visible</button>
+        <span class="text-slate-700">|</span>
+        <select id="omni-bulk-profile" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200">
+            <option value="">Set Profile...</option>
+            {% for p in profiles %}<option value="{{ p.name }}">{{ p.name }}</option>{% endfor %}
+            <option value="2160p">2160p</option>
+            <option value="1080p">1080p</option>
+            <option value="720p">720p</option>
+        </select>
+        <button type="button" onclick="execBulkAction('profile', document.getElementById('omni-bulk-profile').value)" class="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-semibold">Apply</button>
+        {% if root_folders %}
+        <select id="omni-bulk-root" class="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200 max-w-[180px]">
+            <option value="">Move Drive...</option>
+            {% for rf in root_folders %}<option value="{{ rf.path }}">{{ rf.path }}</option>{% endfor %}
+        </select>
+        <button type="button" onclick="execBulkAction('move', document.getElementById('omni-bulk-root').value)" class="px-2.5 py-1 rounded bg-sky-600 hover:bg-sky-500 text-white font-semibold">Move</button>
+        {% endif %}
+        <button type="button" onclick="execBulkAction('monitor', 'true')" class="px-2.5 py-1 rounded bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 text-emerald-200">Monitor</button>
+        <button type="button" onclick="execBulkAction('search', '')" class="px-2.5 py-1 rounded bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/40 text-amber-200">🔎 Auto-Search</button>
+        <button type="button" onclick="execBulkAction('delete', '')" class="px-2.5 py-1 rounded bg-rose-600/30 hover:bg-rose-600/50 border border-rose-500/40 text-rose-200">🗑 Remove</button>
+        <button type="button" onclick="clearAllBulk()" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400">✕</button>
+    </div>
+
+    <!-- Slim Live qBittorrent Download Footer Ticker -->
+    <div id="omni-qbit-ticker" class="hidden fixed bottom-0 inset-x-0 z-30 bg-slate-950/95 border-t border-slate-800 px-4 py-1.5 text-[11px] flex flex-wrap items-center gap-4">
+        <span class="font-bold text-emerald-400 shrink-0">⬇️ Active Downloads:</span>
+        <div id="omni-qbit-items" class="flex flex-wrap items-center gap-4 overflow-x-auto"></div>
+    </div>
+
+
+<script>
+
+async function quickToggleMasterAutomation() {
+    const btn = document.getElementById('quick-auto-pause-btn');
+    const currentlyPaused = btn && btn.textContent.trim().startsWith('Resume');
+    const nextEnabled = currentlyPaused;
+    await toggleAutomationSetting('automation_enabled', nextEnabled);
+    if (btn) {
+        btn.textContent = nextEnabled ? 'Pause Automation' : 'Resume Automation';
+    }
+}
+
+async function toggleAutomationSetting(key, enabled) {
+    try {
+        const res = await fetch('/api/settings/automation-toggle', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({key, enabled})
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+    } catch (e) {
+        console.error('Failed to save automation toggle:', e);
+    }
+}
+</script>
+
+    <!-- Folder / Drive Browser Modal -->
+    <div id="folder-browser-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[82vh] flex flex-col shadow-2xl overflow-hidden">
+            <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-800">
+                <div>
+                    <h3 class="text-sm font-bold text-indigo-300">📂 Browse Drives &amp; Folders</h3>
+                    <p id="fb-current-path" class="text-xs font-mono text-slate-400 mt-0.5">Select a mount or folder</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="scanAllDrivesRoots()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg text-xs text-amber-300">
+                        🔎 Scan Roots
+                    </button>
+                    <button type="button" onclick="closeFolderBrowser()" class="text-slate-400 hover:text-white text-sm px-2">✕</button>
+                </div>
+            </div>
+            <div class="p-4 overflow-y-auto space-y-4 text-xs flex-1">
+                <div>
+                    <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">Mounts / Volumes</div>
+                    <div id="fb-mounts" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+                </div>
+                <div>
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <span class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Directories</span>
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="fb-filter-input" oninput="applyFbFilter()" placeholder="Filter folders..."
+                                   class="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-100 placeholder-slate-500 w-44 sm:w-56">
+                            <button type="button" onclick="clearFbFilter()" class="text-slate-400 hover:text-slate-200 text-xs px-1.5" title="Clear filter">✕</button>
+                            <button type="button" id="fb-up-btn" onclick="fbGoUp()" class="hidden bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded text-slate-200">
+                                ↑ Up
+                            </button>
+                        </div>
+                    </div>
+                    <div id="fb-dirs" class="divide-y divide-slate-800/80 border border-slate-800 rounded-xl bg-slate-950/60 max-h-60 overflow-y-auto"></div>
+                </div>
+            </div>
+            <div class="flex items-center justify-between gap-3 px-5 py-3.5 border-t border-slate-800 bg-slate-950/50">
+                <input type="text" id="fb-selected-path" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-100" placeholder="/mnt/...">
+                <button type="button" onclick="closeFolderBrowser()" class="bg-slate-800 hover:bg-slate-700 px-3.5 py-1.5 rounded-lg text-xs text-slate-300">Cancel</button>
+                <button type="button" onclick="useSelectedFolder()" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-1.5 rounded-lg text-xs font-semibold text-white">Use Folder</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    let _fbParentPath = "";
+    let _fbActivePath = "";
+    let _fbCurrentDirs = [];
+    let _fbScanMode = false;
+
+    function renderFbDirectories() {
+        const dirsEl = document.getElementById("fb-dirs");
+        const filterEl = document.getElementById("fb-filter-input");
+        if (!dirsEl) return;
+        const term = (filterEl ? filterEl.value : "").trim().toLowerCase();
+
+        if (!_fbScanMode && !_fbActivePath) {
+            dirsEl.innerHTML = `<div class="p-3 text-slate-400">Choose a mount above, click Scan Roots, or enter a path below to list subdirectories.</div>`;
+            return;
+        }
+
+        const filtered = term
+            ? _fbCurrentDirs.filter(d =>
+                String(d.name || "").toLowerCase().includes(term) ||
+                String(d.path || "").toLowerCase().includes(term) ||
+                String(d.mount || "").toLowerCase().includes(term)
+            )
+            : _fbCurrentDirs;
+
+        if (!filtered.length) {
+            dirsEl.innerHTML = `<div class="p-3 text-slate-500">${term ? "No matching folders for filter." : "No subdirectories found here."}</div>`;
+            return;
+        }
+
+        if (_fbScanMode) {
+            dirsEl.innerHTML = filtered.map(d => `
+                <div class="flex items-center justify-between px-3 py-2 hover:bg-slate-800/50 gap-2">
+                    <div class="truncate flex-1">
+                        <div class="font-mono text-slate-200 truncate">${d.path}</div>
+                        <div class="text-[11px] text-slate-400">Mount: ${d.mount} • ${d.free_gb ?? "?"} GB free</div>
+                    </div>
+                    <button type="button" onclick="selectFbPath(${JSON.stringify(d.path)})"
+                            class="bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded text-[11px] text-indigo-300 shrink-0">
+                        Select
+                    </button>
+                </div>
+            `).join("");
+        } else {
+            dirsEl.innerHTML = filtered.map(d => `
+                <div class="flex items-center justify-between px-3 py-2 hover:bg-slate-800/50 gap-2">
+                    <button type="button" onclick="loadFilesystemPath(${JSON.stringify(d.path)})"
+                            class="font-mono text-slate-200 hover:text-indigo-300 text-left truncate flex-1">
+                        📁 ${d.name}
+                    </button>
+                    <button type="button" onclick="selectFbPath(${JSON.stringify(d.path)})"
+                            class="bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded text-[11px] text-indigo-300 shrink-0">
+                        Select
+                    </button>
+                </div>
+            `).join("");
+        }
+    }
+
+    function applyFbFilter() {
+        renderFbDirectories();
+    }
+
+    function clearFbFilter() {
+        const filterEl = document.getElementById("fb-filter-input");
+        if (filterEl) {
+            filterEl.value = "";
+            filterEl.focus();
+        }
+        renderFbDirectories();
+    }
+
+    function openFolderBrowser(startPath = "") {
+        const modal = document.getElementById("folder-browser-modal");
+        if (!modal) return;
+        const input = document.getElementById("root-path-input");
+        const initial = startPath || (input && input.value.trim()) || "";
+        modal.classList.remove("hidden");
+        loadFilesystemPath(initial);
+    }
+
+    function closeFolderBrowser() {
+        const modal = document.getElementById("folder-browser-modal");
+        if (modal) modal.classList.add("hidden");
+    }
+
+    function fbGoUp() {
+        if (_fbParentPath !== undefined) {
+            loadFilesystemPath(_fbParentPath);
+        }
+    }
+
+    function selectFbPath(p) {
+        _fbActivePath = p || "";
+        const sel = document.getElementById("fb-selected-path");
+        const cur = document.getElementById("fb-current-path");
+        if (sel) sel.value = _fbActivePath;
+        if (cur) cur.textContent = _fbActivePath || "Select a mount or folder";
+    }
+
+    async function loadFilesystemPath(targetPath = "") {
+        selectFbPath(targetPath);
+        const mountsEl = document.getElementById("fb-mounts");
+        const dirsEl = document.getElementById("fb-dirs");
+        const upBtn = document.getElementById("fb-up-btn");
+        if (dirsEl) dirsEl.innerHTML = `<div class="p-3 text-slate-400">Loading...</div>`;
+        try {
+            const q = targetPath ? `?path=${encodeURIComponent(targetPath)}` : "";
+            const res = await fetch(`/api/filesystem${q}`);
+            const data = await res.json();
+            _fbParentPath = data.parent_path || "";
+            if (upBtn) {
+                if (data.parent_path) upBtn.classList.remove("hidden");
+                else upBtn.classList.add("hidden");
+            }
+            if (mountsEl) {
+                const mounts = data.mounts || [];
+                mountsEl.innerHTML = mounts.length ? mounts.map(m => `
+                    <button type="button" onclick="loadFilesystemPath(${JSON.stringify(m.path)})"
+                            class="text-left bg-slate-950 hover:bg-slate-800/80 border border-slate-800 rounded-xl p-2.5 transition">
+                        <div class="font-mono text-indigo-300 truncate">${m.path}</div>
+                        <div class="text-[11px] text-slate-400 mt-0.5">${m.free_gb ?? "?"} GB free / ${m.total_gb ?? "?"} GB (${m.fstype || "fs"})</div>
+                    </button>
+                `).join("") : `<div class="text-slate-500">No mounts reported</div>`;
+            }
+            _fbScanMode = false;
+            _fbCurrentDirs = data.directories || [];
+            renderFbDirectories();
+        } catch (err) {
+            if (dirsEl) dirsEl.innerHTML = `<div class="p-3 text-rose-400">Failed to load filesystem: ${err}</div>`;
+        }
+    }
+
+    async function scanAllDrivesRoots() {
+        const dirsEl = document.getElementById("fb-dirs");
+        if (dirsEl) dirsEl.innerHTML = `<div class="p-3 text-amber-300">Scanning mounts for root folders...</div>`;
+        try {
+            const res = await fetch("/api/filesystem/all-drives");
+            const data = await res.json();
+            _fbScanMode = true;
+            _fbCurrentDirs = data.directories || [];
+            renderFbDirectories();
+        } catch (err) {
+            if (dirsEl) dirsEl.innerHTML = `<div class="p-3 text-rose-400">Scan failed: ${err}</div>`;
+        }
+    }
+
+    function useSelectedFolder() {
+        const sel = document.getElementById("fb-selected-path");
+        const input = document.getElementById("root-path-input");
+        const chosen = (sel && sel.value.trim()) || _fbActivePath;
+        if (input && chosen) {
+            input.value = chosen;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        closeFolderBrowser();
+    }
+    </script>
+
+</body>
+</html>

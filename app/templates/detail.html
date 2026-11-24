@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ item.title }} — OmniArr</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+    <div class="w-full px-3 sm:px-6 lg:px-10 py-4 md:py-6">
+        <div class="mb-5 flex items-center justify-between">
+            <a href="/" class="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-400 hover:text-indigo-300 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg">
+                ← Back to Library
+            </a>
+            <span class="text-xs uppercase tracking-wider text-slate-500 font-semibold">{{ item.media_type }} Details</span>
+        </div>
+
+        <div class="relative bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+            {% if meta.backdrop_url %}
+            <div class="absolute inset-0 opacity-15 pointer-events-none">
+                <img src="{{ meta.backdrop_url }}" alt="" class="w-full h-full object-cover">
+            </div>
+            {% endif %}
+
+            <div class="relative p-6 md:p-8 flex flex-col md:flex-row gap-6 md:gap-8">
+                <!-- Poster -->
+                <div class="w-40 sm:w-44 md:w-52 flex-shrink-0 mx-auto md:mx-0 flex flex-col gap-2">
+                    <div class="aspect-[2/3] rounded-xl overflow-hidden bg-slate-800 border border-slate-700 shadow-lg">
+                        {% if item.poster_url %}
+                        <img src="{{ item.poster_url }}" alt="{{ item.title }}" class="w-full h-full object-cover">
+                        {% else %}
+                        <div class="w-full h-full flex items-center justify-center p-4 text-center text-slate-400 text-sm font-medium">
+                            {{ item.title }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    <button type="button" onclick="openPosterPicker()" class="w-full bg-slate-800/90 hover:bg-indigo-600 border border-slate-700 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-slate-200 transition">
+                        🎨 Change Poster
+                    </button>
+                </div>
+
+                <!-- Metadata & Actions -->
+                <div class="flex-1 flex flex-col justify-between space-y-5">
+                    <div>
+                        <div class="flex flex-wrap items-center gap-2.5 mb-2">
+                            <h1 class="text-2xl md:text-3xl font-bold text-white">
+                                {{ item.title }} {% if item.year %}<span class="text-slate-400 font-normal">({{ item.year }})</span>{% endif %}
+                            </h1>
+                            {% if item.status == 'available' %}
+                                <span class="bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 px-2.5 py-0.5 rounded-full text-xs font-semibold">Available</span>
+                            {% elif item.status == 'downloading' %}
+                                <span class="bg-amber-500/20 border border-amber-500/40 text-amber-300 px-2.5 py-0.5 rounded-full text-xs font-semibold">Downloading</span>
+                            {% else %}
+                                <span class="bg-rose-500/20 border border-rose-500/40 text-rose-300 px-2.5 py-0.5 rounded-full text-xs font-semibold">Wanted</span>
+                            {% endif %}
+                        </div>
+
+                        <!-- Key Facts Bar: Release Date, Runtime, Rating, Profile -->
+                        <div class="flex flex-wrap items-center gap-2 text-xs text-slate-300 mb-4">
+                            {% if meta.release_date %}
+                            <span class="bg-slate-800/90 border border-slate-700 px-2.5 py-1 rounded-md">📅 {{ meta.release_date }}</span>
+                            {% endif %}
+                            {% if meta.runtime_min %}
+                            <span class="bg-slate-800/90 border border-slate-700 px-2.5 py-1 rounded-md">⏱ {{ meta.runtime_min }} min</span>
+                            {% endif %}
+                            {% if meta.content_rating %}
+                            <span class="bg-slate-800/90 border border-slate-700 px-2.5 py-1 rounded-md font-semibold">{{ meta.content_rating }}</span>
+                            {% endif %}
+                            {% if meta.rating %}
+                            <span class="bg-amber-500/15 border border-amber-500/30 text-amber-300 px-2.5 py-1 rounded-md">★ {{ meta.rating }}</span>
+                            {% endif %}
+                            <span class="bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 px-2.5 py-1 rounded-md font-medium">{{ item.quality_profile }}</span>
+                            {% if meta.studio %}
+                            <span class="bg-slate-800/90 border border-slate-700 px-2.5 py-1 rounded-md text-slate-400">{{ meta.studio }}</span>
+                            {% endif %}
+                        </div>
+
+                        {% if meta.genres %}
+                        <div class="flex flex-wrap gap-1.5 mb-4">
+                            {% for g in meta.genres %}
+                            <span class="text-[11px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded">{{ g }}</span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        <!-- Synopsis -->
+                        <div class="mb-4">
+                            <h2 class="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1.5">Synopsis</h2>
+                            <p class="text-sm text-slate-200 leading-relaxed">
+                                {{ meta.summary or "No synopsis available yet. Sync with Plex or refresh metadata once imported." }}
+                            </p>
+                        </div>
+
+                        {% if meta.tagline %}
+                        <p class="text-xs italic text-indigo-300/90 mb-3">“{{ meta.tagline }}”</p>
+                        {% endif %}
+
+                        {% if meta.scores %}
+                        <div class="mb-4">
+                            <h2 class="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-2">Critic &amp; Audience Scores</h2>
+                            <div class="flex flex-wrap gap-2">
+                                {% for sc in meta.scores %}
+                                <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs
+                                    {{ 'bg-amber-950/40 border-amber-700/50 text-amber-200' if sc.badge == 'critic' else 'bg-indigo-950/50 border-indigo-700/50 text-indigo-200' }}">
+                                    <span class="font-semibold">{{ sc.source }}</span>
+                                    <span class="font-mono font-bold text-white">{{ sc.value }}</span>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Storage & Tracking Info -->
+                        <div class="grid sm:grid-cols-2 gap-2.5 text-xs bg-slate-950/60 border border-slate-800 rounded-lg p-3">
+                            <div>
+                                <span class="text-slate-500">Added / Requested:</span>
+                                <span class="text-slate-300 ml-1">{{ item.added_at.strftime('%Y-%m-%d %H:%M') if item.added_at else 'N/A' }}</span>
+                            </div>
+                            <div>
+                                <span class="text-slate-500">External ID:</span>
+                                <span class="text-slate-300 font-mono ml-1">{{ item.external_id or 'N/A' }}</span>
+                            </div>
+                            <div class="sm:col-span-2 truncate">
+                                <span class="text-slate-500">Library Path:</span>
+                                <span class="text-slate-300 font-mono ml-1">{{ item.file_path or 'Not imported yet' }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action Bar -->
+                    <div class="pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <form action="/search/{{ item.id }}" method="post">
+                                <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-lg text-xs font-medium">
+                                    🔍 {{ 'Auto Upgrade' if item.status == 'available' else 'Auto Search & Grab' }}
+                                </button>
+                            </form>
+                            <button type="button" data-title="{{ item.title }}" onclick="openManualSearch({{ item.id }}, this.dataset.title)"
+                                    class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3.5 py-2 rounded-lg text-xs font-medium">
+                                📋 Pick Release
+                            </button>
+                            {% if item.status == 'downloading' %}
+                            <button type="button" onclick="forceImportDetail(this, {{ item.id }})"
+                                    class="bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 px-3.5 py-2 rounded-lg text-xs font-medium">
+                                ⬇ Force Import Now
+                            </button>
+                            {% endif %}
+                        </div>
+                        <form action="/delete/{{ item.id }}" method="post" onsubmit="return confirm('Remove {{ item.title }} from OmniArr?');">
+                            <button type="submit" class="text-rose-400 hover:text-rose-300 text-xs px-3 py-2">Remove Title</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Cast & Top Actors Section -->
+        {% if meta.cast %}
+        <div class="mt-6 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+                <div>
+                    <h2 class="text-base font-bold text-indigo-300">🎭 Top Cast &amp; Characters</h2>
+                    <p class="text-xs text-slate-400">Billed actors and roles for {{ item.title }}</p>
+                </div>
+                <span class="text-xs text-slate-500 font-mono">{{ meta.cast|length }} billed</span>
+            </div>
+            <div class="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-9 xl:grid-cols-10 2xl:grid-cols-12 gap-2.5">
+                {% for actor in meta.cast %}
+                <div class="bg-slate-950/80 border border-slate-800/90 rounded-xl overflow-hidden flex flex-col hover:border-indigo-500/50 transition">
+                    <div class="aspect-[3/4] bg-slate-800 overflow-hidden flex items-center justify-center">
+                        {% if actor.photo %}
+                        <img src="{{ actor.photo }}" alt="{{ actor.name }}" class="w-full h-full object-cover" loading="lazy">
+                        {% else %}
+                        <div class="w-12 h-12 rounded-full bg-slate-700/80 flex items-center justify-center text-sm font-bold text-indigo-300">
+                            {{ actor.name[:2]|upper }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="p-2.5 flex-1 flex flex-col justify-between">
+                        <div class="text-xs font-semibold text-slate-100 leading-snug line-clamp-2" title="{{ actor.name }}">{{ actor.name }}</div>
+                        {% if actor.character %}
+                        <div class="text-[11px] text-slate-400 mt-1 line-clamp-2" title="{{ actor.character }}">as {{ actor.character }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- What Critics & Users Say (Multi-Source Reviews) -->
+        <div class="mt-6 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3 mb-4">
+                <div>
+                    <h2 class="text-base font-bold text-indigo-300">💬 What Critics &amp; Users Say</h2>
+                    <p class="text-xs text-slate-400">Aggregated audience &amp; critic reviews across connected metadata providers</p>
+                </div>
+                <span class="text-xs text-slate-400">{{ meta.reviews|length }} review(s)</span>
+            </div>
+
+            {% if meta.reviews %}
+            <div class="grid md:grid-cols-2 xl:grid-cols-3 gap-3.5">
+                {% for rev in meta.reviews %}
+                <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-4 flex flex-col justify-between gap-3">
+                    <div>
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide
+                                    {{ 'bg-amber-950 text-amber-300 border border-amber-700/50' if rev.is_critic else 'bg-sky-950 text-sky-300 border border-sky-700/50' }}">
+                                    {{ rev.source }}
+                                </span>
+                                <span class="text-xs font-semibold text-slate-200 truncate">{{ rev.author }}</span>
+                            </div>
+                            {% if rev.rating %}
+                            <span class="shrink-0 text-xs font-mono font-bold text-amber-300">{{ rev.rating }}</span>
+                            {% endif %}
+                        </div>
+                        <p class="text-xs text-slate-300 leading-relaxed whitespace-pre-line line-clamp-6">{{ rev.content }}</p>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-xs text-slate-400 bg-slate-950/60 border border-slate-800/80 rounded-xl p-5 text-center">
+                No written reviews returned yet for <strong class="text-slate-200">{{ item.title }}</strong>.
+                {% if not cfg.tmdb_api_key %}
+                <span class="block mt-1 text-slate-500">Tip: Add a free TMDB API key (and optional OMDb API key) under <a href="/?tab=connect" class="text-indigo-400 hover:underline">Settings → Connect</a> to unlock full TMDB, IMDb, and Rotten Tomatoes critic/user reviews.</span>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Move Folder & Auto-Transfer Panel -->
+        <div class="mt-6 bg-slate-900 border border-slate-800 rounded-xl p-5">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5 mb-3">
+                <div>
+                    <h2 class="text-base font-semibold text-indigo-300">Move Folder &amp; Auto-Transfer Files</h2>
+                    <p class="text-xs text-slate-400">Relocate this {{ item.media_type }} to a different root drive and automatically move existing files on disk</p>
+                </div>
+            </div>
+            <div class="grid sm:grid-cols-3 gap-3 items-end">
+                <div class="sm:col-span-2">
+                    <label class="block text-xs text-slate-400 mb-1">Destination Root Folder</label>
+                    <div class="flex flex-wrap sm:flex-nowrap gap-2">
+                        {% if available_roots %}
+                        <select id="move-root-select" onchange="document.getElementById('move-root-input').value = this.value"
+                                class="bg-slate-800 border border-slate-700 rounded px-3 py-2 text-xs text-slate-200">
+                            <option value="">-- Select Configured Root --</option>
+                            {% for r in available_roots %}
+                            <option value="{{ r }}">{{ r }}</option>
+                            {% endfor %}
+                        </select>
+                        {% endif %}
+                        <input id="move-root-input" type="text" placeholder="/media/tv"
+                               value="{{ available_roots[0] if available_roots else '' }}"
+                               class="flex-1 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-xs font-mono text-slate-200">
+                    </div>
+                </div>
+                <div class="flex flex-col sm:items-end gap-2">
+                    <label class="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                        <input id="move-auto-transfer" type="checkbox" checked class="rounded bg-slate-800 border-slate-700 text-indigo-500">
+                        <span>Auto-transfer existing files</span>
+                    </label>
+                    <button type="button" onclick="moveMediaFolder(this, {{ item.id }})"
+                            class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-medium">
+                        🚚 Move Folder
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        {% if episodes %}
+        <div class="mt-6 bg-slate-900 border border-slate-800 rounded-xl p-5">
+            <h2 class="text-base font-semibold text-indigo-300 border-b border-slate-800 pb-2 mb-3">Tracked Episodes ({{ episodes|length }})</h2>
+            <div class="divide-y divide-slate-800/80 text-xs">
+                {% for ep in episodes %}
+                <div class="py-2 flex items-center justify-between gap-3">
+                    <div>
+                        <span class="font-mono text-indigo-300 font-semibold">S{{ '%02d'|format(ep.season_number) }}E{{ '%02d'|format(ep.episode_number) }}</span>
+                        <span class="text-slate-200 ml-2">{{ ep.title or 'Episode ' ~ ep.episode_number }}</span>
+                    </div>
+                    <span class="px-2 py-0.5 rounded {{ 'bg-emerald-500/20 text-emerald-300' if ep.has_file else 'bg-slate-800 text-slate-400' }}">
+                        {{ ep.quality or ('Imported' if ep.has_file else 'Wanted') }}
+                    </span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Manual Release Picker Modal -->
+    <div id="manual-search-modal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl">
+            <div class="p-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h3 id="ms-modal-title" class="text-base font-semibold text-indigo-300">Manual Release Search</h3>
+                    <p class="text-[11px] text-slate-400">Sorted by OmniArr Score</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input id="ms-custom-query" type="text" placeholder="Custom search override (e.g. S01E01)..."
+                           class="bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-xs text-slate-200 w-56">
+                    <button type="button" onclick="runManualSearchQuery()" class="bg-indigo-600 hover:bg-indigo-500 px-3 py-1 rounded text-xs font-medium">Search</button>
+                    <button type="button" onclick="document.getElementById('manual-search-modal').classList.add('hidden')" class="text-slate-400 hover:text-white text-sm px-2">✕</button>
+                </div>
+            </div>
+            <div id="ms-modal-body" class="p-4 overflow-y-auto flex-1 text-xs"></div>
+        </div>
+    </div>
+
+    <script>
+        let _msCurrentItemId = null;
+        async function openManualSearch(itemId, title) {
+            _msCurrentItemId = itemId;
+            document.getElementById('ms-modal-title').textContent = `Releases: ${title}`;
+            document.getElementById('ms-custom-query').value = '';
+            document.getElementById('manual-search-modal').classList.remove('hidden');
+            await runManualSearchQuery();
+        }
+        async function runManualSearchQuery() {
+            const body = document.getElementById('ms-modal-body');
+            const q = document.getElementById('ms-custom-query').value.trim();
+            body.innerHTML = '<div class="text-slate-400 text-center py-8">Querying Prowlarr indexers...</div>';
+            const res = await fetch(`/api/search/manual/${_msCurrentItemId}?q=${encodeURIComponent(q)}`);
+            const data = await res.json();
+            if (data.error) { body.innerHTML = `<div class="text-rose-400 text-center py-8">${data.error}</div>`; return; }
+            if (!data.releases || !data.releases.length) { body.innerHTML = '<div class="text-slate-400 text-center py-8">No releases returned.</div>'; return; }
+            window._msLastReleases = data.releases;
+            const rows = data.releases.map((r, idx) => `<tr class="border-b border-slate-800/80">
+                <td class="py-2 pr-2 font-mono text-[11px] text-slate-200 break-all">${r.title}</td>
+                <td class="py-2 px-2 text-slate-400 whitespace-nowrap">${r.indexer}</td>
+                <td class="py-2 px-2 text-slate-300 whitespace-nowrap">${r.size_gb} GB</td>
+                <td class="py-2 px-2 text-emerald-400 whitespace-nowrap">${r.seeders} / ${r.peers}</td>
+                <td class="py-2 px-2 text-indigo-300 font-semibold whitespace-nowrap">${r.score}</td>
+                <td class="py-2 pl-2 text-right"><button type="button" onclick="grabManualRelease(this, ${idx})" class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded text-[11px]">Grab</button></td>
+            </tr>`).join('');
+            body.innerHTML = `<table class="w-full text-left border-collapse"><thead><tr class="border-b border-slate-700 text-slate-400 text-[11px]"><th class="pb-2">Release</th><th class="pb-2 px-2">Indexer</th><th class="pb-2 px-2">Size</th><th class="pb-2 px-2">Seed/Peer</th><th class="pb-2 px-2">Score</th><th class="pb-2 pl-2 text-right">Action</th></tr></thead><tbody>${rows}</tbody></table>`;
+        }
+        async function grabManualRelease(btn, idx) {
+            const rel = window._msLastReleases[idx];
+            btn.disabled = true; btn.textContent = 'Sending...';
+            const res = await fetch('/api/grab/manual', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({item_id: _msCurrentItemId, download_url: rel.download_url})});
+            if (res.ok) { btn.className = 'bg-emerald-600 text-white px-2.5 py-1 rounded text-[11px]'; btn.textContent = '✓ Grabbed'; }
+        }
+        async function forceImportDetail(btn, mediaId) {
+            btn.disabled = true; btn.textContent = 'Importing...';
+            const res = await fetch('/api/activity/import', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({media_id: mediaId})});
+            const data = await res.json();
+            if (res.ok && data.ok) { window.location.reload(); }
+            else { alert(data.detail || 'Import failed'); btn.disabled = false; btn.textContent = '⬇ Force Import Now'; }
+        }
+
+        async function moveMediaFolder(btn, mediaId) {
+            const newRoot = document.getElementById('move-root-input').value.trim();
+            const transferFiles = document.getElementById('move-auto-transfer').checked;
+            if (!newRoot) {
+                alert('Please select or enter a destination root folder.');
+                return;
+            }
+            const msg = transferFiles
+                ? `Move this title to "${newRoot}" and automatically transfer all existing files on disk?`
+                : `Update OmniArr path to "${newRoot}" without moving files on disk?`;
+            if (!confirm(msg)) return;
+
+            btn.disabled = true;
+            btn.textContent = transferFiles ? 'Transferring files...' : 'Updating path...';
+            try {
+                const res = await fetch(`/api/media/${mediaId}/move`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({new_root: newRoot, transfer_files: transferFiles})
+                });
+                const data = await res.json();
+                if (res.ok && data.ok) {
+                    alert(`Moved to: ${data.new_path}\nFiles transferred: ${data.moved_files}`);
+                    window.location.reload();
+                } else {
+                    alert(data.detail || 'Failed to move folder.');
+                    btn.disabled = false;
+                    btn.textContent = '🚚 Move Folder';
+                }
+            } catch (e) {
+                alert('Error: ' + e);
+                btn.disabled = false;
+                btn.textContent = '🚚 Move Folder';
+            }
+        }
+
+    </script>
+
+    {% if item.media_type == 'tv' %}
+    <div class="w-full px-3 sm:px-6 lg:px-10 mt-6"><div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <div class="flex items-center justify-between mb-4">
+            <div>
+                <h2 class="text-lg font-bold text-indigo-300">📺 Seasons & Episodes</h2>
+                <p class="text-xs text-slate-400">On-disk episode inventory & interactive per-season / per-episode release search</p>
+            </div>
+            <button type="button" onclick="loadTvSeasons()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg text-xs text-slate-200">↻ Rescan Episodes</button>
+        </div>
+        <div id="tv-seasons-container" class="space-y-4 text-xs">
+            <div class="text-slate-400">Scanning disk & fetching episode guide...</div>
+        </div>
+    </div>
+    </div>
+    <script>
+        async function loadTvSeasons() {
+            const box = document.getElementById('tv-seasons-container');
+            if (!box) return;
+            try {
+                const res = await fetch('/api/media/{{ item.id }}/seasons');
+                const data = await res.json();
+                const seasons = data.seasons || [];
+                if (!seasons.length) {
+                    box.innerHTML = '<div class="text-slate-500">No episodes found on disk or via metadata lookup.</div>';
+                    return;
+                }
+                box.innerHTML = seasons.map(sec => {
+                    const sPad = String(sec.season).padStart(2, '0');
+                    const rows = sec.episodes.map(ep => {
+                        const badge = ep.on_disk
+                            ? `<span class="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700/50">${ep.quality} · ${ep.size_mb} MB</span>`
+                            : `<span class="px-2 py-0.5 rounded bg-rose-950/80 text-rose-300 border border-rose-700/50">Missing</span>`;
+                        const searchQ = `{{ item.title | replace("'", "\'") }} ${ep.code}`;
+                        return `<tr class="border-t border-slate-800/80 hover:bg-slate-800/40">
+                            <td class="py-2 px-3 font-mono text-indigo-300">${ep.code}</td>
+                            <td class="py-2 px-3 text-slate-200">${ep.name}</td>
+                            <td class="py-2 px-3 text-slate-400">${ep.airdate || '-'}</td>
+                            <td class="py-2 px-3">${badge}</td>
+                            <td class="py-2 px-3 text-right">
+                                <a href="/?q=${encodeURIComponent(searchQ)}&auto_pick={{ item.id }}" class="bg-slate-800 hover:bg-indigo-600 px-2.5 py-1 rounded text-[11px] text-slate-200">🔍 Search</a>
+                            </td>
+                        </tr>`;
+                    }).join('');
+                    return `<details class="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden" ${sec.season === seasons[0].season ? 'open' : ''}>
+                        <summary class="px-4 py-3 cursor-pointer flex items-center justify-between bg-slate-900/70 hover:bg-slate-800/60">
+                            <span class="font-bold text-slate-100">Season ${sec.season} <span class="ml-2 text-slate-400 font-normal">(${sec.on_disk}/${sec.total} episodes on disk)</span></span>
+                            <a href="/?q=${encodeURIComponent('{{ item.title | replace("'", "\'") }} S' + sPad)}&auto_pick={{ item.id }}" class="bg-indigo-600/80 hover:bg-indigo-500 px-2.5 py-1 rounded text-[11px] text-white font-medium">🔍 Search Season ${sec.season}</a>
+                        </summary>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left">
+                                <thead class="bg-slate-900/40 text-slate-400 text-[11px]">
+                                    <tr><th class="py-2 px-3">Code</th><th class="py-2 px-3">Episode</th><th class="py-2 px-3">Air Date</th><th class="py-2 px-3">Status</th><th class="py-2 px-3 text-right">Action</th></tr>
+                                </thead>
+                                <tbody>${rows}</tbody>
+                            </table>
+                        </div>
+                    </details>`;
+                }).join('');
+            } catch (e) {
+                box.innerHTML = '<div class="text-rose-400">Error loading seasons.</div>';
+            }
+        }
+        loadTvSeasons();
+    </script>
+    {% endif %}
+
+
+
+    <div id="poster-picker-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full p-6 shadow-2xl max-h-[88vh] flex flex-col">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h3 class="text-base font-bold text-indigo-300">🎨 Choose Poster for {{ item.title }}</h3>
+                    <p class="text-xs text-slate-400">Select from Plex, local disk art, public metadata, or paste a custom image URL</p>
+                </div>
+                <button type="button" onclick="closePosterPicker()" class="text-slate-400 hover:text-white text-sm px-2">✕</button>
+            </div>
+            <div class="flex gap-2 mb-4">
+                <input type="text" id="custom-poster-url-input" placeholder="https://... or /api/media/{{ item.id }}/local-poster" value="{{ item.poster_url or '' }}" class="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100">
+                <button type="button" onclick="applyCustomPosterUrl()" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg text-xs font-semibold text-white">Save URL</button>
+            </div>
+            <div id="poster-candidates-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 overflow-y-auto pr-1 text-xs">
+                <div class="text-slate-400 col-span-full py-6 text-center">Searching Plex & metadata sources...</div>
+            </div>
+        </div>
+    </div>
+    <script>
+        function closePosterPicker() {
+            document.getElementById('poster-picker-modal').classList.add('hidden');
+        }
+        async function selectPosterCandidate(url) {
+            const res = await fetch('/api/media/{{ item.id }}/poster', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({poster_url: url})
+            });
+            const data = await res.json();
+            if (data.ok) location.reload();
+        }
+        function applyCustomPosterUrl() {
+            const url = document.getElementById('custom-poster-url-input').value.trim();
+            selectPosterCandidate(url);
+        }
+        async function openPosterPicker() {
+            const modal = document.getElementById('poster-picker-modal');
+            const grid = document.getElementById('poster-candidates-grid');
+            modal.classList.remove('hidden');
+            grid.innerHTML = '<div class="text-slate-400 col-span-full py-6 text-center">Searching Plex & metadata sources...</div>';
+            try {
+                const res = await fetch('/api/media/{{ item.id }}/posters');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                const cands = data.candidates || [];
+                if (!cands.length) {
+                    grid.innerHTML = '<div class="text-slate-500 col-span-full py-6 text-center">No automatic candidates found—paste any direct image URL above.</div>';
+                    return;
+                }
+                grid.innerHTML = cands.map(c => `
+                    <div data-url="${c.url.replace(/"/g, "&quot;")}" onclick="selectPosterCandidate(this.dataset.url)" class="cursor-pointer group bg-slate-950 border border-slate-800 hover:border-indigo-500 rounded-xl overflow-hidden flex flex-col">
+                        <div class="aspect-[2/3] bg-slate-900 overflow-hidden">
+                            <img src="${c.url}" class="w-full h-full object-cover group-hover:scale-105 transition" loading="lazy">
+                        </div>
+                        <div class="p-2">
+                            <span class="inline-block px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 text-[10px] font-bold mb-1">${c.source}</span>
+                            <div class="text-[11px] text-slate-200 truncate" title="${c.label}">${c.label}</div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                grid.innerHTML = '<div class="text-rose-400 col-span-full py-6 text-center">Failed to load poster candidates.</div>';
+            }
+        }
+    </script>
+</body>
+</html>
