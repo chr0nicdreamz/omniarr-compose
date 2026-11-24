@@ -1093,14 +1093,21 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
     drive_free_map = {d["mount"]: d["free_gb"] for d in drives}
     roots_map = get_media_roots(db)
     root_folders = []
+    try:
+        _warn_gb = float(cfg.get("low_disk_warn_gb") or cfg.get("min_free_space_gb") or 100)
+    except Exception:
+        _warn_gb = 100.0
     for m_type, paths in roots_map.items():
         for p in paths:
             p_str = str(p)
             free_gb = drive_free_map.get(p_str)
+            if free_gb is None and p.parent.exists():
+                free_gb = drive_free_map.get(str(p.parent))
             exists = free_gb is not None or p.exists()
             if exists and free_gb is None:
                 free_gb = round(shutil.disk_usage(p).free / (1024**3), 1)
-            root_folders.append({"media_type": m_type, "path": p_str, "exists": exists, "free_gb": free_gb})
+            low_disk = (float(free_gb) < _warn_gb) if free_gb is not None else False
+            root_folders.append({"media_type": m_type, "path": p_str, "exists": exists, "free_gb": free_gb, "low_disk": low_disk, "warn_gb": _warn_gb})
 
 
     import calendar as _pycal
@@ -1156,7 +1163,7 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
             "media_id": show.id,
             "date": ep.air_date,
             "title": show.title,
-            "subtitle": f"S{ep.season_number:02d}E{ep.episode_number:02d}" + (f" • {ep.title}" "f ep.title else ""),
+            "subtitle": f"S{ep.season_number:02d}E{ep.episode_number:02d}" + (f" • {ep.title}" if ep.title else ""),
             "has_file": bool(ep.has_file),
             "is_past_or_today": ep.air_date <= today_str,
             "is_today": ep.air_date == today_str,
@@ -1984,7 +1991,7 @@ async def test_service_connection(service: str, request: Request, db: Session = 
                 if r.status_code == 200:
                     ver = (r.json() or {}).get("version", "connected")
                     return {"ok": True, "message": f"Connected to Prowlarr (v{ver})"}
-                return {"ok": False, "message": f"Prowlarr returned HTTP {r.status_code} — verify API Key."}"
+                return {"ok": False, "message": f"Prowlarr returned HTTP {r.status_code} — verify API Key."}
             if svc in ("qbittorrent", "qbit"):
                 url = (payload.get("qbit_url") or cfg.get("qbit_url") or "").strip().rstrip("/")
                 user = (payload.get("qbit_user") or cfg.get("qbit_user") or "").strip()
@@ -2011,7 +2018,7 @@ async def test_service_connection(service: str, request: Request, db: Session = 
                 if r.status_code == 200:
                     ver = (r.json().get("MediaContainer") or {}).get("version", "connected")
                     return {"ok": True, "message": f"Connected to Plex Media Server (v{ver})"}
-                return {"ok": False, "message": f"Plex returned HTTP {r.status_code} — verify Plex Token."}"
+                return {"ok": False, "message": f"Plex returned HTTP {r.status_code} — verify Plex Token."}
             if svc == "jellyfin":
                 url = (payload.get("jellyfin_url") or cfg.get("jellyfin_url") or "").strip().rstrip("/")
                 key = (payload.get("jellyfin_api_key") or cfg.get("jellyfin_api_key") or "").strip()
@@ -2072,7 +2079,8 @@ async def api_library_bulk_action(request: Request, db: Session = Depends(get_db
         return {"ok": True, "message": f"Set monitored={flag} for {len(items)} items."}
     elif action == "move" and value:
         _asyncio.create_task(_bg_bulk_move(ids, value))
-        return {"ok": True, "message": f"Queued background drive move for {len(items)} items → {value}"}"    elif action == "search":
+        return {"ok": True, "message": f"Queued background drive move for {len(items)} items → {value}"}
+    elif action == "search":
         async def _bg_bulk_search(target_ids: list[int]):
             sdb = SessionLocal()
             try:

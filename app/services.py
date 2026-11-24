@@ -123,8 +123,19 @@ _DRIVE_CACHE = {"ts": 0.0, "data": []}
 
 def get_drive_stats(db: Session = None, force: bool = False) -> list:
     now = _time.time()
+    cfg = get_settings(db) if db is not None else DEFAULT_SETTINGS
+    try:
+        warn_gb = float(cfg.get("low_disk_warn_gb") or cfg.get("min_free_space_gb") or 100)
+    except Exception:
+        warn_gb = 100.0
     if not force and _DRIVE_CACHE["data"] and (now - _DRIVE_CACHE["ts"]) < 60:
-        return _DRIVE_CACHE["data"]
+        out = []
+        for row in _DRIVE_CACHE["data"]:
+            d_copy = dict(row)
+            d_copy["warn_gb"] = warn_gb
+            d_copy["low_disk"] = float(d_copy.get("free_gb", 0)) < warn_gb
+            out.append(d_copy)
+        return out
     seen = set()
     drives = []
     for roots in get_media_roots(db).values():
@@ -138,8 +149,18 @@ def get_drive_stats(db: Session = None, force: bool = False) -> list:
                 total_gb = round(usage.total / (1024**3), 1)
                 free_gb = round(usage.free / (1024**3), 1)
                 used_pct = round(((usage.total - usage.free) / usage.total) * 100, 1) if usage.total else 0
-                drives.append({"mount": str(mount), "free_gb": free_gb, "total_gb": total_gb, "used_pct": used_pct})
-    return sorted(drives, key=lambda d: d["mount"])
+                drives.append({
+                    "mount": str(mount),
+                    "free_gb": free_gb,
+                    "total_gb": total_gb,
+                    "used_pct": used_pct,
+                    "warn_gb": warn_gb,
+                    "low_disk": free_gb < warn_gb,
+                })
+    res = sorted(drives, key=lambda d: d["mount"])
+    _DRIVE_CACHE["ts"] = now
+    _DRIVE_CACHE["data"] = res
+    return res
 
 def translate_qbit_path(remote_path: str, cfg: dict) -> Path:
     norm_path = (remote_path or '').replace('\\', '/')
@@ -153,10 +174,35 @@ def translate_qbit_path(remote_path: str, cfg: dict) -> Path:
         return candidate
     return Path(norm_path)
 
-def get_best_dest_dir(media_type: str, cfg: dict, db: Session = None) -> Path:
-    min_free_bytes = float(cfg.get("min_free_space_gb", 20)) * (1024**3)
+def get_best_dest_dir(media_type: str, cfg: dict, db: Session = None, hint: str = "") -> Path:
+    try:
+        warn_gb = float(cfg.get("low_disk_warn_gb") or cfg.get("min_free_space_gb") or 20)
+    except Exception:
+        warn_gb = 20.0
+    min_free_bytes = warn_gb * (1024**3)
     roots_map = get_media_roots(db)
-    type_roots = roots_map.get(media_type, MEDIA_ROOTS[media_type])
+    type_roots = roots_map.get(media_type, MEDIA_ROOTS.get(media_type, [Path("/data/media")]))
+
+    # Check drive_routing_rules (one per line or comma-separated: keyword=/path)
+    raw_rules = (cfg.get("drive_routing_rules") or "").strip()
+    hint_l = (hint or "").lower()
+    if raw_rules and hint_l:
+        tokens = [t.strip() for chunk in raw_rules.splitlines() for t in chunk.split(",") if t.strip()]
+        for tok in tokens:
+            if "=" not in tok:
+                continue
+            key_part, target_part = tok.split("=", 1)
+            kw = key_part.strip().lower()
+            target_p = Path(target_part.strip())
+            if kw and kw in hint_l and str(target_p):
+                if not target_p.exists():
+                    try:
+                        target_p.mkdir(parents=True, exist_ok=True)
+                    except Exception:
+                        continue
+                if target_p.exists() and shutil.disk_usage(target_p).free >= min_free_bytes:
+                    return target_p
+
     candidates = [p for p in type_roots if p.exists()]
     if not candidates:
         fallback = type_roots[0]
@@ -287,7 +333,8 @@ def _find_local_poster_file(file_path: str | None) -> Path | None:
         db.add(HistoryEvent(
             event_type="search",
             title=f"{query} ({media_type.upper()})",
-            detail=f"{len(None)} result(s) • Top: {top_title[:140]}","        ))
+            detail=f"0 result(s) • Top: {top_title[:140]}",
+        ))
         # Prune search/history logs older than 30 days
         cutoff_30d = _dt.utcnow() - _td(days=30)
         db.query(HistoryEvent).filter(HistoryEvent.created_at < cutoff_30d).delete()
@@ -820,7 +867,7 @@ async def fetch_media_metadata(item: MediaItem, cfg: dict) -> dict:
                                         meta["reviews"].append({
                                             "source": "Apple TV / iTunes",
                                             "author": author,
-                                            "rating": f"{stars}/5 ★" "f stars else "",
+                                            "rating": f"{stars}/5 ★" if stars else "",
                                             "is_critic": False,
                                             "content": full_txt[:700],
                                         })
@@ -876,7 +923,7 @@ async def fetch_media_metadata(item: MediaItem, cfg: dict) -> dict:
                                     meta["reviews"].append({
                                         "source": "TMDB Community",
                                         "author": r_author,
-                                        "rating": f"{r_rating}/10 ★" "f r_rating else "",
+                                        "rating": f"{r_rating}/10 ★" if r_rating else "",
                                         "is_critic": False,
                                         "content": r_body[:750],
                                     })

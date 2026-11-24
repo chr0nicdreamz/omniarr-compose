@@ -1763,6 +1763,57 @@
                 <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 text-slate-400">Scanning codecs &amp; resolutions...</div>
             </div>
 
+            <!-- Drive & Root Folder Low-Disk Threshold Status -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                    <div>
+                        <h3 class="text-sm font-bold text-indigo-300">💾 Drive &amp; Root Folder Low-Disk Status</h3>
+                        <p class="text-xs text-slate-400">Warning threshold: <strong class="text-slate-200">{{ cfg.low_disk_warn_gb or cfg.min_free_space_gb or 100 }} GB</strong> free space before flagging low disk.</p>
+                    </div>
+                    <a href="/?tab=settings&amp;section=features" class="text-xs text-indigo-300 hover:text-indigo-200 underline">Edit Low-Disk &amp; Routing Rules →</a>
+                </div>
+                <div class="grid md:grid-cols-2 gap-4 text-xs">
+                    <div class="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-2">
+                        <div class="font-semibold text-slate-300">Mounted Drives</div>
+                        {% for d in drives %}
+                        <div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-800/70 last:border-b-0">
+                            <span class="font-mono text-slate-200 truncate">{{ d.mount }}</span>
+                            <span class="flex items-center gap-2 shrink-0">
+                                <span class="text-slate-400">{{ d.free_gb }} GB free / {{ d.total_gb }} GB</span>
+                                {% if d.low_disk %}
+                                <span class="px-2 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-rose-300 font-semibold">LOW DISK</span>
+                                {% else %}
+                                <span class="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">OK</span>
+                                {% endif %}
+                            </span>
+                        </div>
+                        {% else %}
+                        <div class="text-slate-500">No mounted drives detected.</div>
+                        {% endfor %}
+                    </div>
+                    <div class="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-2">
+                        <div class="font-semibold text-slate-300">Configured Root Folders</div>
+                        {% for rf in root_folders %}
+                        <div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-800/70 last:border-b-0">
+                            <span class="font-mono text-slate-200 truncate"><span class="uppercase text-indigo-300 mr-1.5">[{{ rf.media_type }}]</span>{{ rf.path }}</span>
+                            <span class="flex items-center gap-2 shrink-0">
+                                <span class="text-slate-400">{{ rf.free_gb if rf.free_gb is not none else "n/a" }} GB</span>
+                                {% if rf.low_disk %}
+                                <span class="px-2 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-rose-300 font-semibold">LOW DISK</span>
+                                {% elif rf.exists %}
+                                <span class="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">OK</span>
+                                {% else %}
+                                <span class="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300">MISSING</span>
+                                {% endif %}
+                            </span>
+                        </div>
+                        {% else %}
+                        <div class="text-slate-500">No root folders configured.</div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
             <!-- Large H.264 Files Ready for Tdarr Transcoding -->
             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
                 <h3 class="text-sm font-bold text-indigo-300 mb-1">⚡ Large H.264 Files (Prime Tdarr Transcode Candidates)</h3>
