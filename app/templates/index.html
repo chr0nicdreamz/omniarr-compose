@@ -120,6 +120,10 @@
                    class="px-4 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab in ('activity', 'history') else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
                     📥 Activity &amp; Logs
                 </a>
+                <a href="/?tab=add"
+                   class="px-3.5 py-2 rounded-lg text-xs font-semibold transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'add' else 'text-slate-300 hover:bg-slate-800' }}">
+                    ➕ Add / Import
+                </a>
                 <a href="/?tab=settings&section=media"
                    class="px-4 py-2 rounded-md transition {{ 'bg-indigo-600 text-white shadow' if active_tab == 'settings' else 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' }}">
                     ⚙️ Settings
@@ -246,39 +250,88 @@
         {% endmacro %}
 
         <!-- TAB 1: SPLIT LIBRARY -->
-        {% if active_tab == 'library' %}
-        <!-- Quick Add & Search Bar -->
-        <div class="bg-slate-900 border border-slate-800 p-4 rounded-xl mb-6 flex flex-wrap gap-3 items-end">
-            <div class="flex-1 min-w-[200px]">
-                <label class="block text-xs text-slate-400 mb-1">Request / Add New Title or Show</label>
-                <input type="text" id="quick-req-title" placeholder="e.g. Dune Part Two or Breaking Bad"
-                       onkeydown="if(event.key==='Enter'){event.preventDefault();openRequestModal();}"
-                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        {% if active_tab == 'add' %}
+        <div class="space-y-6 max-w-5xl">
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                    <div>
+                        <h2 class="text-lg font-semibold text-indigo-300">➕ Request / Add New Title or Show</h2>
+                        <p class="text-xs text-slate-400">Search metadata, pick seasons, or add a title without cluttering the main library view.</p>
+                    </div>
+                    <a href="/?tab=settings&amp;section=features" class="text-xs text-indigo-300 hover:text-indigo-200 underline">Configure Feature Settings →</a>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <input id="quick-add-input" type="text" placeholder="Type a movie or TV show name..."
+                           class="flex-1 min-w-[220px] bg-slate-800 border border-slate-700 rounded-lg px-3.5 py-2 text-sm">
+                    <button type="button" onclick="openRequestModalFromQuick()"
+                            class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg text-sm font-medium">
+                        Search &amp; Request
+                    </button>
+                </div>
             </div>
-            <div class="w-24">
-                <label class="block text-xs text-slate-400 mb-1">Year</label>
-                <input type="number" id="quick-req-year" placeholder="2024"
-                       onkeydown="if(event.key==='Enter'){event.preventDefault();openRequestModal();}"
-                       class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
-            </div>
-            <div class="w-32">
-                <label class="block text-xs text-slate-400 mb-1">Type</label>
-                <select id="sticky-media-type" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
-                    <option value="movie">Movie</option>
-                    <option value="tv">TV Show</option>
-                    <option value="music">Music</option>
-                </select>
-            </div>
-            <button type="button" id="quick-auto-pause-btn" onclick="quickToggleMasterAutomation()"
-                    class="px-3.5 py-2 rounded-lg text-xs font-medium border {{ 'bg-amber-950/70 hover:bg-amber-900/70 text-amber-200 border-amber-700/60' if cfg.get('automation_enabled', 'true')|lower == 'false' else 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' }}">
-                {{ 'Resume Automation' if cfg.get('automation_enabled', 'true')|lower == 'false' else 'Pause Automation' }}
-            </button>
-            <button type="button" onclick="openRequestModal()" class="bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-lg text-sm font-medium shadow">
-                + Request &amp; Configure
-            </button>
-        </div>
 
-        <!-- Seerr-Style Request / Add Modal -->
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                    <div>
+                        <h2 class="text-lg font-semibold text-indigo-300">📂 Import Existing Folder or Library</h2>
+                        <p class="text-xs text-slate-400">Scan an existing folder on disk or network mount and register qualifying media folders into OmniArr.</p>
+                    </div>
+                    <a href="/?tab=settings&amp;section=features" class="text-xs text-slate-400 hover:text-slate-200 underline">Import Rules &amp; Filters</a>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <div class="md:col-span-2 flex gap-2">
+                        <input id="import-folder-path" type="text" placeholder="/mnt/plex_movies or /mnt/plex_tv"
+                               class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm font-mono">
+                        <button type="button" onclick="openFolderBrowser('import-folder-path')"
+                                class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2 rounded-lg text-xs font-medium">
+                            📁 Browse
+                        </button>
+                    </div>
+                    <select id="import-folder-type" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+                        <option value="movie">Movies</option>
+                        <option value="tv">TV Shows</option>
+                    </select>
+                    <button type="button" onclick="runFolderImport()"
+                            class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg text-sm font-medium">
+                        ▶ Import Folder
+                    </button>
+                </div>
+                <div id="import-folder-status" class="text-xs text-slate-400"></div>
+            </div>
+        </div>
+        <script>
+        async function runFolderImport() {
+            const inp = document.getElementById('import-folder-path');
+            const sel = document.getElementById('import-folder-type');
+            const st = document.getElementById('import-folder-status');
+            const folder_path = (inp ? inp.value : '').trim();
+            const media_type = sel ? sel.value : 'movie';
+            if (!folder_path) {
+                if (st) st.textContent = "Please enter or browse to a folder path first.";
+                return;
+            }
+            if (st) st.textContent = "Importing folder...";
+            try {
+                const resp = await fetch("/api/library/import-folder", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({folder_path, media_type})
+                });
+                const data = await resp.json();
+                if (!data.ok) {
+                    if (st) st.innerHTML = `<span class="text-rose-400">Error: ${data.error || "Import failed"}</span>`;
+                    return;
+                }
+                if (st) st.innerHTML = `<span class="text-emerald-400">Imported ${data.added} title(s), skipped ${data.skipped} from <code>${data.path}</code>.</span>`;
+            } catch (err) {
+                if (st) st.innerHTML = `<span class="text-rose-400">Request error: ${err}</span>`;
+            }
+        }
+        </script>
+        {% endif %}
+
+        {% if active_tab == 'library' %}
+                <!-- Seerr-Style Request / Add Modal -->
         <div id="request-media-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             <form action="/add" method="post" onsubmit="syncSelectedSeasonsInput()" class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
                 <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
@@ -791,7 +844,8 @@
                     ('indexers', '🔎 Indexers (' ~ indexers|length ~ ')'),
                     ('clients', '⬇️ Download Clients'),
                     ('connect', '🔌 Connections'),
-                    ('backup', '💾 Backup & Restore')
+                    ('backup', '💾 Backup & Restore'),
+                    ('features', '⚙️ Feature Settings')
                 ] %}
                 {% for skey, slabel in sec_tabs %}
                 <a href="/?tab=settings&section={{ skey }}"
@@ -1333,6 +1387,140 @@
         </form>
         
 
+        {% endif %}
+
+        {% if settings_section == 'features' %}
+        <form method="post" action="/settings" class="space-y-5 max-w-6xl">
+            <input type="hidden" name="section" value="features">
+
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-3">
+                <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">📺 Season &amp; Episode Manager Settings</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Default Season Monitoring for New Shows</label>
+                        <select name="default_season_monitor_mode" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                            <option value="all" {{ 'selected' if (cfg.default_season_monitor_mode or 'all') == 'all' }}>All Seasons</option>
+                            <option value="latest" {{ 'selected' if cfg.default_season_monitor_mode == 'latest' }}>Latest Season Only</option>
+                            <option value="future" {{ 'selected' if cfg.default_season_monitor_mode == 'future' }}>Future / Unaired Only</option>
+                        </select>
+                    </div>
+                    <label class="flex items-center gap-2.5 text-sm text-slate-300 pt-5">
+                        <input type="checkbox" name="season_toggle_auto_search" value="true" {{ 'checked' if cfg.season_toggle_auto_search == 'true' }}>
+                        <span>Auto-search newly monitored seasons when toggled</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-3">
+                <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">💽 Drive Routing &amp; Low-Disk Alerts Settings</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Low-Disk Warning Buffer (GB)</label>
+                        <input type="number" name="low_disk_warn_gb" value="{{ cfg.low_disk_warn_gb or cfg.min_free_space_gb or 100 }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Tag / Keyword Root Rules (one per line: tag=/mnt/path)</label>
+                        <textarea name="drive_routing_rules" rows="3" placeholder="anime=/mnt/plex_anime&#10;kids=/mnt/plex_kids" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">{{ cfg.drive_routing_rules or '' }}</textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-3">
+                <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">🔄 Disk-vs.-DB Reconciliation Settings</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-slate-300">
+                    <label class="flex items-center gap-2">
+                        <input type="checkbox" name="reconcile_mark_missing_wanted" value="true" {{ 'checked' if (cfg.reconcile_mark_missing_wanted or 'true') == 'true' }}>
+                        <span>Mark missing disk files as wanted</span>
+                    </label>
+                    <label class="flex items-center gap-2">
+                        <input type="checkbox" name="reconcile_sync_episodes" value="true" {{ 'checked' if (cfg.reconcile_sync_episodes or 'true') == 'true' }}>
+                        <span>Sync episode on_disk &amp; file paths</span>
+                    </label>
+                    <label class="flex items-center gap-2">
+                        <input type="checkbox" name="reconcile_import_untracked" value="true" {{ 'checked' if cfg.reconcile_import_untracked == 'true' }}>
+                        <span>Register untracked folders on scan</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-3">
+                <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">⚡ Post-Import &amp; Tdarr Hooks Settings</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label class="flex items-center gap-2 text-sm text-slate-300">
+                        <input type="checkbox" name="post_import_auto_tdarr" value="true" {{ 'checked' if cfg.post_import_auto_tdarr == 'true' }}>
+                        <span>Auto-queue imported media path to Tdarr</span>
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-slate-300">
+                        <input type="checkbox" name="post_import_scoped_refresh" value="true" {{ 'checked' if (cfg.post_import_scoped_refresh or 'true') == 'true' }}>
+                        <span>Trigger path-scoped media server refresh</span>
+                    </label>
+                    <div class="md:col-span-2">
+                        <label class="block text-xs text-slate-400 mb-1">Post-Import Webhook URL (Optional)</label>
+                        <input type="url" name="post_import_webhook_url" value="{{ cfg.post_import_webhook_url or '' }}" placeholder="http://..." class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm font-mono">
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-3">
+                <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">🎯 Release Keywords &amp; Upgrade Guardrails Settings</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Include Release Keywords (comma-separated)</label>
+                        <input type="text" name="release_include_terms" value="{{ cfg.release_include_terms or '' }}" placeholder="x265, hevc, 1080p" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Exclude Release Keywords (comma-separated)</label>
+                        <input type="text" name="release_exclude_terms" value="{{ cfg.release_exclude_terms or 'cam, ts, telesync, workprint' }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Minimum Upgrade Size Gain (MB)</label>
+                        <input type="number" name="min_upgrade_size_mb" value="{{ cfg.min_upgrade_size_mb or 250 }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                    </div>
+                    <label class="flex items-center gap-2 text-sm text-slate-300 pt-5">
+                        <input type="checkbox" name="prefer_hevc_upgrades" value="true" {{ 'checked' if cfg.prefer_hevc_upgrades == 'true' }}>
+                        <span>Favor HEVC / x265 releases during upgrades</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-3">
+                <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">📋 Wanted / Missing &amp; Cutoff Dashboard Settings</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label class="flex items-center gap-2 text-sm text-slate-300">
+                        <input type="checkbox" name="wanted_show_unmonitored" value="true" {{ 'checked' if cfg.wanted_show_unmonitored == 'true' }}>
+                        <span>Include unmonitored items in Wanted / Cutoff view</span>
+                    </label>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Default Wanted / Cutoff Page Size</label>
+                        <input type="number" name="wanted_page_size" value="{{ cfg.wanted_page_size or 50 }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                    </div>
+                </div>
+            </div>
+
+
+            <div class="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-3">
+                <h2 class="text-lg font-semibold text-indigo-300 border-b border-slate-800 pb-2">📂 Existing Folder &amp; Library Import Settings</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Default Monitored State for Imported Titles</label>
+                        <select name="import_default_monitored" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                            <option value="true" {{ 'selected' if (cfg.import_default_monitored or 'true') == 'true' }}>Monitored</option>
+                            <option value="false" {{ 'selected' if cfg.import_default_monitored == 'false' }}>Unmonitored</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Minimum Video File Size (MB)</label>
+                        <input type="number" step="1" name="import_min_file_mb" value="{{ cfg.import_min_file_mb or 25 }}" class="w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm">
+                    </div>
+                    <label class="flex items-center gap-2 text-sm text-slate-300 pt-5">
+                        <input type="checkbox" name="import_skip_extras" value="true" {{ 'checked' if (cfg.import_skip_extras or 'true') == 'true' }}>
+                        <span>Skip Sample / Extras / Featurette folders</span>
+                    </label>
+                </div>
+            </div>
+
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded text-sm font-medium">Save Feature Settings</button>
+        </form>
         {% endif %}
 
         {% if settings_section == 'backup' %}
