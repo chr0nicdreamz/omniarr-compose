@@ -1210,12 +1210,28 @@ async def get_tv_seasons_and_episodes(item: MediaItem) -> list[dict]:
             "quality": disk_info["quality"],
         })
 
+    import json as _json
+    monitored_set = set()
+    try:
+        raw_ms = getattr(item, "monitored_seasons", None) or "[]"
+        parsed_ms = _json.loads(raw_ms) if isinstance(raw_ms, str) else raw_ms
+        if isinstance(parsed_ms, list):
+            for x in parsed_ms:
+                if isinstance(x, int) and not isinstance(x, bool):
+                    monitored_set.add(x)
+                elif isinstance(x, str) and x.strip().isdigit():
+                    monitored_set.add(int(x.strip()))
+    except Exception:
+        monitored_set = set()
+
     result = []
     for s_num in sorted(seasons_map.keys(), reverse=True):
         ep_list = sorted(seasons_map[s_num], key=lambda x: x["episode"])
         have_count = sum(1 for e in ep_list if e["on_disk"])
+        is_mon = True if not monitored_set else (s_num in monitored_set)
         result.append({
             "season": s_num,
+            "monitored": is_mon,
             "total": len(ep_list),
             "on_disk": have_count,
             "episodes": ep_list,
@@ -2188,7 +2204,7 @@ async def hunt_quality_upgrades(db) -> int:
     """Scan monitored available items whose file quality is below their profile cutoff and grab upgrades."""
     from .models import MediaItem, QualityProfile, HistoryEvent
     cfg = get_settings(db)
-    if str(cfg.get("auto_upgrade_enabled", "false")).lower() != "true":
+    if str(cfg.get("auto_upgrade_enabled", "true")).lower() != "true":
         return 0
 
     candidates = (
@@ -2217,24 +2233,43 @@ async def hunt_quality_upgrades(db) -> int:
         if not needs_upgrade:
             continue
 
-        query = f"{item.title} {item.year}" if item.year else item.title
+        import json as _json
+        upgrade_queries = [f"{item.title} {item.year}" if item.year else item.title]
+        if (item.media_type or "").lower() == "tv":
+            try:
+                raw_ms = getattr(item, "monitored_seasons", None) or "[]"
+                parsed_ms = _json.loads(raw_ms) if isinstance(raw_ms, str) else raw_ms
+            except Exception:
+                parsed_ms = []
+            ms_nums = sorted({
+                int(x) for x in (parsed_ms if isinstance(parsed_ms, list) else [])
+                if (isinstance(x, int) and not isinstance(x, bool)) or (isinstance(x, str) and x.strip().isdigit())
+            })
+            if ms_nums:
+                upgrade_queries = [f"{item.title} S{s:02d}" for s in ms_nums]
         try:
-            releases = await search_prowlarr(query, item.media_type, item.quality_profile, db)
-            if releases:
-                best = releases[0]
-                best_title = (best.get("title") or "").lower()
-                if ("2160" in target and ("2160" in best_title or "4k" in best_title)) or ("1080" in target and "1080" in best_title):
-                    dl_link = best.get("downloadUrl") or best.get("magnetUrl") or best.get("guid")
-                    t_hash = await send_to_qbittorrent(dl_link, item.id, db) if dl_link else None
-                    if t_hash:
-                        item.torrent_hash = t_hash
-                        item.status = "downloading"
-                        db.add(HistoryEvent(
-                            event_type="upgrade_grabbed",
-                            media_title=item.title,
-                            details=f"Quality cutoff upgrade ({target}): {best.get('title', '')[:80]}",
-                        ))
-                        upgraded += 1
+            grabbed_this_item = False
+            for query in upgrade_queries:
+                releases = await search_prowlarr(query, item.media_type, item.quality_profile, db)
+                if releases:
+                    best = releases[0]
+                    best_title = (best.get("title") or "").lower()
+                    if ("2160" in target and ("2160" in best_title or "4k" in best_title)) or ("1080" in target and "1080" in best_title):
+                        dl_link = best.get("downloadUrl") or best.get("magnetUrl") or best.get("guid")
+                        t_hash = await send_to_qbittorrent(dl_link, item.id, db) if dl_link else None
+                        if t_hash:
+                            item.torrent_hash = t_hash
+                            item.status = "downloading"
+                            db.add(HistoryEvent(
+                                event_type="upgrade_grabbed",
+                                media_title=item.title,
+                                details=f"Quality cutoff upgrade ({target}): {best.get('title', '')[:80]}",
+                            ))
+                            upgraded += 1
+                            grabbed_this_item = True
+                            break
+            if grabbed_this_item:
+                pass
         except Exception:
             continue
     if upgraded:

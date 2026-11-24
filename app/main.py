@@ -38,6 +38,24 @@ except Exception:
     pass
 templates = Jinja2Templates(directory="app/templates")
 
+
+def _tv_monitored_season_list(item) -> list[int]:
+    import json as _json
+    raw = getattr(item, "monitored_seasons", None) or "[]"
+    try:
+        parsed = _json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        parsed = []
+    if not isinstance(parsed, list):
+        return []
+    out = []
+    for x in parsed:
+        if isinstance(x, int) and not isinstance(x, bool):
+            out.append(x)
+        elif isinstance(x, str) and x.strip().isdigit():
+            out.append(int(x.strip()))
+    return sorted(set(out))
+
 async def scheduled_tasks():
     from .services import hunt_quality_upgrades
     db = SessionLocal()
@@ -52,16 +70,26 @@ async def scheduled_tasks():
             await hunt_aired_calendar_items(db)
             wanted = db.query(MediaItem).filter(MediaItem.status == "wanted", MediaItem.monitored == True).limit(15).all()
             for item in wanted:
-                query = f"{item.title} {item.year}" if item.year else item.title
-                releases = await search_prowlarr(query, item.media_type, item.quality_profile, db)
-                if releases:
-                    best = releases[0]
-                    dl_link = best.get("downloadUrl") or best.get("magnetUrl") or best.get("guid")
-                    t_hash = await send_to_qbittorrent(dl_link, item.id, db) if dl_link else None
-                    if t_hash:
-                        item.torrent_hash = t_hash
-                        item.status = "downloading"
-                        db.commit()
+                queries = []
+                if (item.media_type or "").lower() == "tv":
+                    seasons_list = _tv_monitored_season_list(item)
+                    if seasons_list:
+                        queries = [f"{item.title} S{s:02d}" for s in seasons_list]
+                    else:
+                        queries = [item.title]
+                else:
+                    queries = [f"{item.title} {item.year}" if item.year else item.title]
+                for query in queries:
+                    releases = await search_prowlarr(query, item.media_type, item.quality_profile, db)
+                    if releases:
+                        best = releases[0]
+                        dl_link = best.get("downloadUrl") or best.get("magnetUrl") or best.get("guid")
+                        t_hash = await send_to_qbittorrent(dl_link, item.id, db) if dl_link else None
+                        if t_hash:
+                            item.torrent_hash = t_hash
+                            item.status = "downloading"
+                            db.commit()
+                            break
         if str(cfg.get("auto_upgrade_enabled", "true")).lower() != "false":
             await hunt_quality_upgrades(db)
     finally:
@@ -1158,14 +1186,20 @@ async def add_media(
     db.commit()
     db.refresh(item)
 
-    query = f"{title} {year}" if year else title
-    releases = await search_prowlarr(query, media_type, quality_profile, db)
-    if releases:
-        t_hash = await send_to_qbittorrent(releases[0]["downloadUrl"], item.id, db)
-        if t_hash:
-            item.torrent_hash = t_hash
-            item.status = "downloading"
-            db.commit()
+    if (media_type or "").lower() == "tv" and parsed_seasons:
+        add_queries = [f"{title} S{s:02d}" for s in sorted(set(parsed_seasons))]
+    else:
+        add_queries = [f"{title} {year}" if year else title]
+    for query in add_queries:
+        releases = await search_prowlarr(query, media_type, quality_profile, db)
+        if releases:
+            t_hash = await send_to_qbittorrent(releases[0]["downloadUrl"], item.id, db)
+            if t_hash:
+                item.torrent_hash = t_hash
+                item.status = "downloading"
+                db.commit()
+                if (media_type or "").lower() != "tv" or not parsed_seasons:
+                    break
 
     await sync_posters_from_plex(db)
     return RedirectResponse(url="/", status_code=303)
@@ -1345,29 +1379,45 @@ async def api_add_roots_batch(payload: dict, db: Session = Depends(get_db)):
 
 @app.get("/api/filesystem/all-drives")
 def browse_all_drives_folders():
-    """Walks up to 4 levels deep across all mounted drives to find nested root folders without listing individual movie/show folders."""
+    """Walks up to 3 levels deep across mounted drives to find candidate root folders without slow deep media walks."""
     info = browse_filesystem("")
     all_dirs = []
     seen = set()
-    skip_names = {"lost+found", "$recycle.bin", "system volume information", "windows", "program files", "program files (x86)", "programdata", "users", "perflogs", "downloads", "incomplete"}
+    skip_names = {
+        "lost+found", "$recycle.bin", "system volume information", "windows",
+        "program files", "program files (x86)", "programdata", "users",
+        "perflogs", "downloads", "incomplete", "pms", "plex media server",
+        "cache", "codecs", "crash reports", "metadata", "transcode",
+        "phototranscoder", "media"
+    }
     video_exts = (".mkv", ".mp4", ".avi", ".m4v")
+    max_entries = 500
 
     def _walk_roots(base_mp: Path, free_gb: float, cur: Path, depth: int):
-        if depth > 4:
+        if depth > 3 or len(all_dirs) >= max_entries:
             return
         try:
-            children = [c for c in sorted(cur.iterdir(), key=lambda x: x.name.lower())
-                        if c.is_dir() and not c.name.startswith(".") and c.name.lower() not in skip_names]
+            entries = sorted(cur.iterdir(), key=lambda x: x.name.lower())
         except PermissionError:
             return
+        # If this folder directly holds video files or Season subfolders, treat it as a leaf media/show dir
+        try:
+            if any(
+                (f.is_file() and f.suffix.lower() in video_exts) or
+                (f.is_dir() and f.name.lower().startswith("season "))
+                for f in entries
+            ):
+                return
+        except PermissionError:
+            return
+
+        children = [
+            c for c in entries
+            if c.is_dir() and not c.name.startswith(".") and c.name.lower() not in skip_names
+        ]
         for c in children:
-            # Skip leaf title folders that directly hold video files
-            try:
-                has_direct_video = any(f.is_file() and f.suffix.lower() in video_exts for f in c.iterdir())
-            except PermissionError:
-                has_direct_video = False
-            if has_direct_video:
-                continue
+            if len(all_dirs) >= max_entries:
+                break
             p_str = str(c)
             if p_str not in seen:
                 seen.add(p_str)
@@ -1375,11 +1425,15 @@ def browse_all_drives_folders():
                 all_dirs.append({"mount": str(base_mp), "free_gb": free_gb, "name": rel_name, "path": p_str, "depth": depth})
             _walk_roots(base_mp, free_gb, c, depth + 1)
 
-    for mt in info.get("mounts", []):
-        mp = Path(mt["path"])
-        if str(mp) in ("/", "/boot", "/tmp", "/var", "/opt", "/home", "/root", "/srv", "/mnt"):
+    mounts = info.get("mounts", [])
+    specific_mounts = [m["path"] for m in mounts if m["path"].startswith("/mnt/")]
+    for mt in mounts:
+        mp_str = mt["path"]
+        if mp_str in ("/", "/boot", "/tmp", "/var", "/opt", "/home", "/root", "/srv", "/media", "/data"):
             continue
-        _walk_roots(mp, mt.get("free_gb", 0), mp, 1)
+        if mp_str == "/mnt" and specific_mounts:
+            continue
+        _walk_roots(Path(mp_str), mt.get("free_gb", 0), Path(mp_str), 1)
     return {"directories": all_dirs}
 
 @app.get("/api/filesystem")
@@ -1575,7 +1629,7 @@ def seerr_get_movies(tmdbId: int = None, db: Session = Depends(get_db)):
     return [{"id": m.id, "title": m.title, "tmdbId": int(m.external_id or 0), "hasFile": m.status == "available"} for m in q.all()]
 
 @app.post("/api/v3/movie", dependencies=[Depends(verify_api_key)])
-async def seerr_add_movie(payload: dict, db: Session = Depends(get_db)):
+async def seerr_add_movie(payload: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     cfg = get_settings(db)
     rf = (payload.get("rootFolderPath") or "").strip() or None
     qp = (payload.get("qualityProfileName") or "").strip() or cfg.get("default_movie_quality", "1080p")
@@ -1590,6 +1644,27 @@ async def seerr_add_movie(payload: dict, db: Session = Depends(get_db)):
     )
     db.add(item)
     db.commit()
+    db.refresh(item)
+    add_opts = payload.get("addOptions") or {}
+    if add_opts.get("searchForMovie", True):
+        async def _run_seerr_movie(mid: int):
+            sdb = SessionLocal()
+            try:
+                it = sdb.query(MediaItem).filter_by(id=mid).first()
+                if not it:
+                    return
+                q = f"{it.title} {it.year}" if it.year else it.title
+                rels = await search_prowlarr(q, "movie", it.quality_profile, sdb)
+                if rels:
+                    dl = rels[0].get("downloadUrl") or rels[0].get("magnetUrl") or rels[0].get("guid")
+                    th = await send_to_qbittorrent(dl, it.id, sdb) if dl else None
+                    if th:
+                        it.torrent_hash = th
+                        it.status = "downloading"
+                        sdb.commit()
+            finally:
+                sdb.close()
+        background_tasks.add_task(_run_seerr_movie, item.id)
     return {"id": item.id, "title": item.title, "tmdbId": payload.get("tmdbId")}
 
 @app.get("/api/v3/series", dependencies=[Depends(verify_api_key)])
@@ -1630,6 +1705,33 @@ async def seerr_add_series(payload: dict, db: Session = Depends(get_db)):
 @app.post("/api/v3/command", dependencies=[Depends(verify_api_key)])
 async def seerr_command(payload: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     cmd_name = payload.get("name") or payload.get("commandName") or "Unknown"
+    if cmd_name in ("SeriesSearch", "MoviesSearch", "DownloadedEpisodesScan"):
+        async def _run_seerr_cmd(cmd_payload: dict):
+            sdb = SessionLocal()
+            try:
+                ids = cmd_payload.get("seriesIds") or cmd_payload.get("movieIds") or []
+                items = sdb.query(MediaItem).filter(MediaItem.id.in_(ids)).all() if ids else (
+                    sdb.query(MediaItem).filter(MediaItem.status == "wanted", MediaItem.monitored == True).limit(5).all()
+                )
+                for it in items:
+                    if (it.media_type or "").lower() == "tv":
+                        s_list = _tv_monitored_season_list(it)
+                        qs = [f"{it.title} S{s:02d}" for s in s_list] if s_list else [it.title]
+                    else:
+                        qs = [f"{it.title} {it.year}" if it.year else it.title]
+                    for q in qs:
+                        rels = await search_prowlarr(q, it.media_type, it.quality_profile, sdb)
+                        if rels:
+                            dl = rels[0].get("downloadUrl") or rels[0].get("magnetUrl") or rels[0].get("guid")
+                            th = await send_to_qbittorrent(dl, it.id, sdb) if dl else None
+                            if th:
+                                it.torrent_hash = th
+                                it.status = "downloading"
+                                sdb.commit()
+                                break
+            finally:
+                sdb.close()
+        background_tasks.add_task(_run_seerr_cmd, dict(payload))
     return {
         "id": 1,
         "name": cmd_name,
@@ -1877,15 +1979,22 @@ async def api_library_bulk_action(request: Request, db: Session = Depends(get_db
                     it = sdb.query(MediaItem).filter_by(id=mid).first()
                     if not it:
                         continue
-                    q = f"{it.title} {it.year}" if it.year else it.title
-                    rels = await search_prowlarr(q, it.media_type, it.quality_profile, sdb)
-                    if rels:
-                        dl = rels[0].get("downloadUrl") or rels[0].get("magnetUrl") or rels[0].get("guid")
-                        th = await send_to_qbittorrent(dl, it.id, sdb) if dl else None
-                        if th:
-                            it.torrent_hash = th
-                            it.status = "downloading"
-                            sdb.commit()
+                    if (it.media_type or "").lower() == "tv":
+                        s_list = _tv_monitored_season_list(it)
+                        qs = [f"{it.title} S{s:02d}" for s in s_list] if s_list else [it.title]
+                    else:
+                        qs = [f"{it.title} {it.year}" if it.year else it.title]
+                    for q in qs:
+                        rels = await search_prowlarr(q, it.media_type, it.quality_profile, sdb)
+                        if rels:
+                            dl = rels[0].get("downloadUrl") or rels[0].get("magnetUrl") or rels[0].get("guid")
+                            th = await send_to_qbittorrent(dl, it.id, sdb) if dl else None
+                            if th:
+                                it.torrent_hash = th
+                                it.status = "downloading"
+                                sdb.commit()
+                                if (it.media_type or "").lower() != "tv" or not _tv_monitored_season_list(it):
+                                    break
             finally:
                 sdb.close()
         _asyncio.create_task(_bg_bulk_search(ids))

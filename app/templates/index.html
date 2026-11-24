@@ -1670,5 +1670,208 @@ async function toggleAutomationSetting(key, enabled) {
     }
 }
 </script>
+
+    <!-- Folder / Drive Browser Modal -->
+    <div id="folder-browser-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[82vh] flex flex-col shadow-2xl overflow-hidden">
+            <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-800">
+                <div>
+                    <h3 class="text-sm font-bold text-indigo-300">📂 Browse Drives &amp; Folders</h3>
+                    <p id="fb-current-path" class="text-xs font-mono text-slate-400 mt-0.5">Select a mount or folder</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="scanAllDrivesRoots()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg text-xs text-amber-300">
+                        🔎 Scan Roots
+                    </button>
+                    <button type="button" onclick="closeFolderBrowser()" class="text-slate-400 hover:text-white text-sm px-2">✕</button>
+                </div>
+            </div>
+            <div class="p-4 overflow-y-auto space-y-4 text-xs flex-1">
+                <div>
+                    <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">Mounts / Volumes</div>
+                    <div id="fb-mounts" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+                </div>
+                <div>
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <span class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Directories</span>
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="fb-filter-input" oninput="applyFbFilter()" placeholder="Filter folders..."
+                                   class="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-100 placeholder-slate-500 w-44 sm:w-56">
+                            <button type="button" onclick="clearFbFilter()" class="text-slate-400 hover:text-slate-200 text-xs px-1.5" title="Clear filter">✕</button>
+                            <button type="button" id="fb-up-btn" onclick="fbGoUp()" class="hidden bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded text-slate-200">
+                                ↑ Up
+                            </button>
+                        </div>
+                    </div>
+                    <div id="fb-dirs" class="divide-y divide-slate-800/80 border border-slate-800 rounded-xl bg-slate-950/60 max-h-60 overflow-y-auto"></div>
+                </div>
+            </div>
+            <div class="flex items-center justify-between gap-3 px-5 py-3.5 border-t border-slate-800 bg-slate-950/50">
+                <input type="text" id="fb-selected-path" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-100" placeholder="/mnt/...">
+                <button type="button" onclick="closeFolderBrowser()" class="bg-slate-800 hover:bg-slate-700 px-3.5 py-1.5 rounded-lg text-xs text-slate-300">Cancel</button>
+                <button type="button" onclick="useSelectedFolder()" class="bg-indigo-600 hover:bg-indigo-500 px-4 py-1.5 rounded-lg text-xs font-semibold text-white">Use Folder</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    let _fbParentPath = "";
+    let _fbActivePath = "";
+    let _fbCurrentDirs = [];
+    let _fbScanMode = false;
+
+    function renderFbDirectories() {
+        const dirsEl = document.getElementById("fb-dirs");
+        const filterEl = document.getElementById("fb-filter-input");
+        if (!dirsEl) return;
+        const term = (filterEl ? filterEl.value : "").trim().toLowerCase();
+
+        if (!_fbScanMode && !_fbActivePath) {
+            dirsEl.innerHTML = `<div class="p-3 text-slate-400">Choose a mount above, click Scan Roots, or enter a path below to list subdirectories.</div>`;
+            return;
+        }
+
+        const filtered = term
+            ? _fbCurrentDirs.filter(d =>
+                String(d.name || "").toLowerCase().includes(term) ||
+                String(d.path || "").toLowerCase().includes(term) ||
+                String(d.mount || "").toLowerCase().includes(term)
+            )
+            : _fbCurrentDirs;
+
+        if (!filtered.length) {
+            dirsEl.innerHTML = `<div class="p-3 text-slate-500">${term ? "No matching folders for filter." : "No subdirectories found here."}</div>`;
+            return;
+        }
+
+        if (_fbScanMode) {
+            dirsEl.innerHTML = filtered.map(d => `
+                <div class="flex items-center justify-between px-3 py-2 hover:bg-slate-800/50 gap-2">
+                    <div class="truncate flex-1">
+                        <div class="font-mono text-slate-200 truncate">${d.path}</div>
+                        <div class="text-[11px] text-slate-400">Mount: ${d.mount} • ${d.free_gb ?? "?"} GB free</div>
+                    </div>
+                    <button type="button" onclick="selectFbPath(${JSON.stringify(d.path)})"
+                            class="bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded text-[11px] text-indigo-300 shrink-0">
+                        Select
+                    </button>
+                </div>
+            `).join("");
+        } else {
+            dirsEl.innerHTML = filtered.map(d => `
+                <div class="flex items-center justify-between px-3 py-2 hover:bg-slate-800/50 gap-2">
+                    <button type="button" onclick="loadFilesystemPath(${JSON.stringify(d.path)})"
+                            class="font-mono text-slate-200 hover:text-indigo-300 text-left truncate flex-1">
+                        📁 ${d.name}
+                    </button>
+                    <button type="button" onclick="selectFbPath(${JSON.stringify(d.path)})"
+                            class="bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded text-[11px] text-indigo-300 shrink-0">
+                        Select
+                    </button>
+                </div>
+            `).join("");
+        }
+    }
+
+    function applyFbFilter() {
+        renderFbDirectories();
+    }
+
+    function clearFbFilter() {
+        const filterEl = document.getElementById("fb-filter-input");
+        if (filterEl) {
+            filterEl.value = "";
+            filterEl.focus();
+        }
+        renderFbDirectories();
+    }
+
+    function openFolderBrowser(startPath = "") {
+        const modal = document.getElementById("folder-browser-modal");
+        if (!modal) return;
+        const input = document.getElementById("root-path-input");
+        const initial = startPath || (input && input.value.trim()) || "";
+        modal.classList.remove("hidden");
+        loadFilesystemPath(initial);
+    }
+
+    function closeFolderBrowser() {
+        const modal = document.getElementById("folder-browser-modal");
+        if (modal) modal.classList.add("hidden");
+    }
+
+    function fbGoUp() {
+        if (_fbParentPath !== undefined) {
+            loadFilesystemPath(_fbParentPath);
+        }
+    }
+
+    function selectFbPath(p) {
+        _fbActivePath = p || "";
+        const sel = document.getElementById("fb-selected-path");
+        const cur = document.getElementById("fb-current-path");
+        if (sel) sel.value = _fbActivePath;
+        if (cur) cur.textContent = _fbActivePath || "Select a mount or folder";
+    }
+
+    async function loadFilesystemPath(targetPath = "") {
+        selectFbPath(targetPath);
+        const mountsEl = document.getElementById("fb-mounts");
+        const dirsEl = document.getElementById("fb-dirs");
+        const upBtn = document.getElementById("fb-up-btn");
+        if (dirsEl) dirsEl.innerHTML = `<div class="p-3 text-slate-400">Loading...</div>`;
+        try {
+            const q = targetPath ? `?path=${encodeURIComponent(targetPath)}` : "";
+            const res = await fetch(`/api/filesystem${q}`);
+            const data = await res.json();
+            _fbParentPath = data.parent_path || "";
+            if (upBtn) {
+                if (data.parent_path) upBtn.classList.remove("hidden");
+                else upBtn.classList.add("hidden");
+            }
+            if (mountsEl) {
+                const mounts = data.mounts || [];
+                mountsEl.innerHTML = mounts.length ? mounts.map(m => `
+                    <button type="button" onclick="loadFilesystemPath(${JSON.stringify(m.path)})"
+                            class="text-left bg-slate-950 hover:bg-slate-800/80 border border-slate-800 rounded-xl p-2.5 transition">
+                        <div class="font-mono text-indigo-300 truncate">${m.path}</div>
+                        <div class="text-[11px] text-slate-400 mt-0.5">${m.free_gb ?? "?"} GB free / ${m.total_gb ?? "?"} GB (${m.fstype || "fs"})</div>
+                    </button>
+                `).join("") : `<div class="text-slate-500">No mounts reported</div>`;
+            }
+            _fbScanMode = false;
+            _fbCurrentDirs = data.directories || [];
+            renderFbDirectories();
+        } catch (err) {
+            if (dirsEl) dirsEl.innerHTML = `<div class="p-3 text-rose-400">Failed to load filesystem: ${err}</div>`;
+        }
+    }
+
+    async function scanAllDrivesRoots() {
+        const dirsEl = document.getElementById("fb-dirs");
+        if (dirsEl) dirsEl.innerHTML = `<div class="p-3 text-amber-300">Scanning mounts for root folders...</div>`;
+        try {
+            const res = await fetch("/api/filesystem/all-drives");
+            const data = await res.json();
+            _fbScanMode = true;
+            _fbCurrentDirs = data.directories || [];
+            renderFbDirectories();
+        } catch (err) {
+            if (dirsEl) dirsEl.innerHTML = `<div class="p-3 text-rose-400">Scan failed: ${err}</div>`;
+        }
+    }
+
+    function useSelectedFolder() {
+        const sel = document.getElementById("fb-selected-path");
+        const input = document.getElementById("root-path-input");
+        const chosen = (sel && sel.value.trim()) || _fbActivePath;
+        if (input && chosen) {
+            input.value = chosen;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        closeFolderBrowser();
+    }
+    </script>
+
 </body>
 </html>
