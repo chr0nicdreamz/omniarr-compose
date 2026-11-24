@@ -287,8 +287,7 @@ def _find_local_poster_file(file_path: str | None) -> Path | None:
         db.add(HistoryEvent(
             event_type="search",
             title=f"{query} ({media_type.upper()})",
-            detail=f"{len(None)} result(s) • Top: {top_title[:140]}",
-        ))
+            detail=f"{len(None)} result(s) • Top: {top_title[:140]}","        ))
         # Prune search/history logs older than 30 days
         cutoff_30d = _dt.utcnow() - _td(days=30)
         db.query(HistoryEvent).filter(HistoryEvent.created_at < cutoff_30d).delete()
@@ -821,7 +820,7 @@ async def fetch_media_metadata(item: MediaItem, cfg: dict) -> dict:
                                         meta["reviews"].append({
                                             "source": "Apple TV / iTunes",
                                             "author": author,
-                                            "rating": f"{stars}/5 ★" if stars else "",
+                                            "rating": f"{stars}/5 ★" "f stars else "",
                                             "is_critic": False,
                                             "content": full_txt[:700],
                                         })
@@ -877,7 +876,7 @@ async def fetch_media_metadata(item: MediaItem, cfg: dict) -> dict:
                                     meta["reviews"].append({
                                         "source": "TMDB Community",
                                         "author": r_author,
-                                        "rating": f"{r_rating}/10 ★" if r_rating else "",
+                                        "rating": f"{r_rating}/10 ★" "f r_rating else "",
                                         "is_critic": False,
                                         "content": r_body[:750],
                                     })
@@ -1014,11 +1013,20 @@ def clean_media_title(raw_name: str) -> tuple[str, int | None]:
 
 def scan_existing_library(db: Session) -> dict:
     """Scans configured movie_roots and tv_roots on disk and registers untracked folders into OmniArr."""
+    cfg = get_settings(db)
+    default_mon = (cfg.get("import_default_monitored") or "true").lower() == "true"
+    skip_extras = (cfg.get("import_skip_extras") or "true").lower() == "true"
+    try:
+        min_mb = float(cfg.get("import_min_file_mb") or 25)
+    except Exception:
+        min_mb = 25.0
+    extra_skip_names = {"sample", "samples", "extras", "featurettes", "behind the scenes", "deleted scenes", "subs", "subtitles"}
+
     roots_map = get_media_roots(db)
     all_items = db.query(MediaItem).all()
     existing_paths = {str(i.file_path).rstrip("/").lower() for i in all_items if i.file_path}
     existing_by_key = {(i.title.lower(), i.media_type): i for i in all_items}
-    video_exts = (".mkv", ".mp4", ".avi", ".m4v")
+    video_exts = (".mkv", ".mp4", ".avi", ".m4v", ".mov", ".m2ts")
     added = 0
     updated = 0
 
@@ -1032,8 +1040,24 @@ def scan_existing_library(db: Session) -> dict:
                     continue
                 if str(entry).rstrip("/").lower() in existing_paths:
                     continue
-                # Verify folder actually contains at least one video file
-                has_vid = any(f.lower().endswith(video_exts) for _, _, files in os.walk(entry) for f in files)
+                if skip_extras and entry.name.strip().lower() in extra_skip_names:
+                    continue
+                # Verify folder actually contains at least one qualifying video file
+                has_vid = False
+                for r_path, _, files in os.walk(entry):
+                    if skip_extras and Path(r_path).name.strip().lower() in extra_skip_names:
+                        continue
+                    for f in files:
+                        if f.lower().endswith(video_exts):
+                            try:
+                                sz_mb = os.path.getsize(os.path.join(r_path, f)) / (1024 * 1024)
+                            except OSError:
+                                sz_mb = 0.0
+                            if sz_mb >= min_mb:
+                                has_vid = True
+                                break
+                    if has_vid:
+                        break
                 if not has_vid:
                     continue
                 title, year = clean_media_title(entry.name.strip())
@@ -1053,7 +1077,7 @@ def scan_existing_library(db: Session) -> dict:
                     quality_profile="1080p",
                     status="available",
                     file_path=str(entry),
-                    monitored=True,
+                    monitored=default_mon,
                 )
                 db.add(new_item)
                 existing_by_key[(title.lower(), mtype)] = new_item
@@ -2276,3 +2300,174 @@ async def hunt_quality_upgrades(db) -> int:
         db.commit()
     return upgraded
 
+
+
+def _parse_folder_title_year(folder_name: str) -> tuple[str, int | None]:
+    m = re.match(r"^(?P<title>.+?)\s*[\(\[](?P<year>19\d{2}|20\d{2})[\)\]]", folder_name.strip())
+    if m:
+        return m.group("title").strip(), int(m.group("year"))
+    return folder_name.strip(), None
+
+def _detect_quality_tag(filename: str) -> str:
+    low = filename.lower()
+    if "2160p" in low or "4k" in low:
+        return "2160p"
+    if "1080p" in low:
+        return "1080p"
+    if "720p" in low:
+        return "720p"
+    return "HD"
+
+def scan_existing_media_roots(db: Session) -> list[dict]:
+    roots = get_media_roots(db)
+    existing = db.query(MediaItem).all()
+    existing_by_path = {str(Path(i.file_path)).rstrip("/"): i for i in existing if i.file_path}
+    existing_by_key = {(i.media_type, i.title.lower(), i.year): i for i in existing}
+    existing_by_title = {(i.media_type, i.title.lower()): i for i in existing}
+
+    video_exts = (".mkv", ".mp4", ".avi", ".m4v")
+    discovered = []
+
+    for m_type in ("movie", "tv"):
+        for root_dir in roots.get(m_type, []):
+            if not root_dir.exists() or not root_dir.is_dir():
+                continue
+            try:
+                entries = sorted(root_dir.iterdir(), key=lambda p: p.name.lower())
+            except PermissionError:
+                continue
+
+            for entry in entries:
+                if not entry.is_dir() or entry.name.startswith("."):
+                    continue
+                title, year = _parse_folder_title_year(entry.name)
+                video_files = []
+                episodes = []
+                total_bytes = 0
+
+                for r, _, files in os.walk(entry):
+                    for f in files:
+                        if f.lower().endswith(video_exts) and "sample" not in f.lower():
+                            fp = Path(r) / f
+                            video_files.append(fp)
+                            try:
+                                total_bytes += fp.stat().st_size
+                            except OSError:
+                                pass
+                            if m_type == "tv":
+                                ep_m = re.search(r"[sS](\d{1,2})[eE](\d{1,3})", f)
+                                if ep_m:
+                                    episodes.append({
+                                        "season": int(ep_m.group(1)),
+                                        "episode": int(ep_m.group(2)),
+                                        "quality": _detect_quality_tag(f),
+                                        "file_path": str(fp),
+                                    })
+
+                if not video_files:
+                    continue
+
+                norm_p = str(entry).rstrip("/")
+                matched = (
+                    existing_by_path.get(norm_p)
+                    or existing_by_key.get((m_type, title.lower(), year))
+                    or existing_by_title.get((m_type, title.lower()))
+                )
+                state = "new"
+                if matched:
+                    state = "tracked_available" if matched.status == "available" and matched.file_path else "linkable"
+
+                discovered.append({
+                    "path": norm_p,
+                    "root_folder": str(root_dir),
+                    "media_type": m_type,
+                    "title": title,
+                    "year": year,
+                    "file_count": len(video_files),
+                    "episode_count": len(episodes),
+                    "size_gb": round(total_bytes / (1024**3), 2),
+                    "state": state,
+                    "matched_id": matched.id if matched else None,
+                    "episodes": episodes[:500],
+                })
+    return discovered
+
+def import_scanned_media(items: list[dict], quality_profile: str, db: Session) -> dict:
+    imported_new = 0
+    linked_existing = 0
+    imported_eps = 0
+
+    for entry in items:
+        path_str = entry.get("path", "").strip()
+        if not path_str:
+            continue
+        m_type = entry.get("media_type", "movie")
+        title = entry.get("title", "").strip()
+        year = entry.get("year")
+        root_folder = entry.get("root_folder", "")
+        matched_id = entry.get("matched_id")
+        episodes = entry.get("episodes") or []
+
+        target_item = db.query(MediaItem).filter_by(id=int(matched_id)).first() if matched_id else None
+        if not target_item:
+            target_item = (
+                db.query(MediaItem)
+                .filter(MediaItem.media_type == m_type, MediaItem.title.ilike(title))
+                .first()
+            )
+
+        if target_item:
+            target_item.status = "available"
+            target_item.file_path = path_str
+            if root_folder and not target_item.root_folder:
+                target_item.root_folder = root_folder
+            linked_existing += 1
+        else:
+            target_item = MediaItem(
+                title=title,
+                year=int(year) if year else None,
+                media_type=m_type,
+                external_id=f"disk:{Path(path_str).name}",
+                quality_profile=quality_profile or "1080p",
+                root_folder=root_folder,
+                status="available",
+                file_path=path_str,
+            )
+            db.add(target_item)
+            db.flush()
+            imported_new += 1
+
+        if m_type == "tv" and episodes:
+            existing_eps = {
+                (e.season_number, e.episode_number): e
+                for e in db.query(EpisodeItem).filter_by(media_item_id=target_item.id).all()
+            }
+            for ep in episodes:
+                s_num = int(ep["season"])
+                e_num = int(ep["episode"])
+                ep_row = existing_eps.get((s_num, e_num))
+                if ep_row:
+                    ep_row.has_file = True
+                    ep_row.quality = ep.get("quality", "HD")
+                    ep_row.file_path = ep.get("file_path")
+                else:
+                    db.add(EpisodeItem(
+                        media_item_id=target_item.id,
+                        season_number=s_num,
+                        episode_number=e_num,
+                        title=f"Episode {e_num}",
+                        has_file=True,
+                        quality=ep.get("quality", "HD"),
+                        file_path=ep.get("file_path"),
+                    ))
+                    existing_eps[(s_num, e_num)] = True
+                imported_eps += 1
+
+    if imported_new or linked_existing:
+        db.add(HistoryEvent(
+            event_type="scan",
+            title="Disk Library Scan Import",
+            detail=f"Imported {imported_new} new, linked {linked_existing} existing ({imported_eps} episodes)",
+        ))
+    db.commit()
+    return {"new": imported_new, "linked": linked_existing, "episodes": imported_eps}

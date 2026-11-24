@@ -132,7 +132,7 @@ from .services import (
     get_settings, save_settings, get_drive_stats, get_media_roots,
     get_best_dest_dir, translate_qbit_path, transfer_file, trigger_plex_scan,
     search_prowlarr, manual_search_prowlarr, send_to_qbittorrent,
-    check_downloads_and_import, sync_posters_from_plex,
+    check_downloads_and_import, sync_posters_from_plex, scan_existing_media_roots, import_scanned_media,
     get_drive_storage_stats,
     move_media_item_folder,
     get_tv_seasons_and_episodes,
@@ -283,6 +283,87 @@ async def _bg_scan_disk():
         _update_bg_task("disk_scan", "Disk Scan", "error", str(e)[:80])
     finally:
         db.close()
+
+@app.post("/api/library/import-folder")
+async def api_import_existing_folder(request: Request, db: Session = Depends(get_db)):
+    data = await request.json() if request.headers.get("content-type", "").startswith("application/json") else dict(await request.form())
+    raw_path = (data.get("folder_path") or "").strip()
+    mtype = (data.get("media_type") or "movie").strip().lower()
+    if mtype not in ("movie", "tv"):
+        mtype = "movie"
+    local_dir = translate_to_local_path(raw_path, get_settings(db))
+    p = Path(local_dir)
+    if not raw_path or not p.exists() or not p.is_dir():
+        return {"ok": False, "error": f"Folder not found: {raw_path}"}
+    cfg = get_settings(db)
+    default_mon = (cfg.get("import_default_monitored") or "true").lower() == "true"
+    skip_extras = (cfg.get("import_skip_extras") or "true").lower() == "true"
+    try:
+        min_mb = float(cfg.get("import_min_file_mb") or 25)
+    except Exception:
+        min_mb = 25.0
+    extra_skip_names = {"sample", "samples", "extras", "featurettes", "behind the scenes", "deleted scenes", "subs", "subtitles"}
+    video_exts = (".mkv", ".mp4", ".avi", ".m4v", ".mov", ".m2ts")
+
+    existing_items = db.query(MediaItem).all()
+    existing_paths = {str(i.file_path).rstrip("/").lower() for i in existing_items if i.file_path}
+    existing_by_key = {(i.title.lower(), i.media_type): i for i in existing_items}
+
+    candidates = [e for e in sorted(p.iterdir()) if e.is_dir() and not e.name.startswith(".")]
+    if not candidates:
+        candidates = [p]
+
+    added = 0
+    skipped = 0
+    imported_titles = []
+    for entry in candidates:
+        if skip_extras and entry.name.strip().lower() in extra_skip_names:
+            skipped += 1
+            continue
+        if str(entry).rstrip("/").lower() in existing_paths:
+            skipped += 1
+            continue
+        has_vid = False
+        for r_path, _, files in os.walk(entry):
+            if skip_extras and Path(r_path).name.strip().lower() in extra_skip_names:
+                continue
+            for f in files:
+                if f.lower().endswith(video_exts):
+                    try:
+                        sz_mb = os.path.getsize(os.path.join(r_path, f)) / (1024 * 1024)
+                    except OSError:
+                        sz_mb = 0.0
+                    if sz_mb >= min_mb:
+                        has_vid = True
+                        break
+            if has_vid:
+                break
+        if not has_vid:
+            skipped += 1
+            continue
+        title, year = clean_media_title(entry.name.strip())
+        if (title.lower(), mtype) in existing_by_key:
+            skipped += 1
+            continue
+        item = MediaItem(
+            title=title,
+            year=year,
+            media_type=mtype,
+            quality_profile="1080p",
+            status="available",
+            file_path=str(entry),
+            monitored=default_mon,
+        )
+        db.add(item)
+        existing_by_key[(title.lower(), mtype)] = item
+        existing_paths.add(str(entry).rstrip("/").lower())
+        added += 1
+        imported_titles.append(title)
+
+    if added > 0:
+        db.commit()
+        record_history(db, "import", f"Folder Import ({added} added)", f"Imported {added} {mtype} folder(s) from {local_dir}")
+    return {"ok": True, "added": added, "skipped": skipped, "path": local_dir, "titles": imported_titles[:25]}
 
 @app.post("/api/library/scan-disk-bg")
 async def api_start_bg_disk_scan():
@@ -577,6 +658,20 @@ async def api_blacklist_torrent(payload: dict, db: Session = Depends(get_db)):
     db.commit()
     return {"ok": True}
 
+
+@app.get("/api/library-scan/preview")
+def api_library_scan_preview(db: Session = Depends(get_db)):
+    items = scan_existing_media_roots(db)
+    return {"ok": True, "items": items}
+
+@app.post("/api/library-scan/import")
+async def api_library_scan_import(payload: dict, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    selected = payload.get("items") or []
+    profile = payload.get("quality_profile") or "1080p"
+    res = import_scanned_media(selected, profile, db)
+    background_tasks.add_task(_bg_sync_posters)
+    return {"ok": True, **res}
+
 @app.get("/api/manual-import/scan")
 def api_scan_unmapped(db: Session = Depends(get_db)):
     cfg = get_settings(db)
@@ -777,7 +872,7 @@ async def restore_db_backup(db_file_upload: UploadFile = File(...), db: Session 
     shutil.move(tmp.name, target_db)
     for ext in ("-wal", "-shm"):
         Path(f"{target_db}{ext}").unlink(missing_ok=True)
-    record_history(db, "settings", "Database Restored", f"Restored SQLite DB from {db_file_upload.filename or "upload"}; safety copy at {safety_copy.name}")
+    record_history(db, "settings", "Database Restored", f"Restored SQLite DB from {db_file_upload.filename or 'upload'}; safety copy at {safety_copy.name}")
     return {"ok": True, "restored_to": str(target_db), "safety_backup": str(safety_copy), "restart_recommended": True}
 
 
@@ -790,8 +885,7 @@ async def _bg_sync_calendar():
             "calendar_sync",
             "Calendar Air-Date Sync",
             "done",
-            f"Checked {res.get('shows_checked', 0)} shows • Updated {res.get('updated_episodes', 0)} eps, {res.get('updated_movies', 0)} movies",
-        )
+            f"Checked {res.get('shows_checked', 0)} shows • Updated {res.get('updated_episodes', 0)} eps, {res.get('updated_movies', 0)} movies","        )
     except Exception as e:
         _update_bg_task("calendar_sync", "Calendar Air-Date Sync", "error", str(e))
     finally:
@@ -1062,7 +1156,7 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
             "media_id": show.id,
             "date": ep.air_date,
             "title": show.title,
-            "subtitle": f"S{ep.season_number:02d}E{ep.episode_number:02d}" + (f" • {ep.title}" if ep.title else ""),
+            "subtitle": f"S{ep.season_number:02d}E{ep.episode_number:02d}" + (f" • {ep.title}" "f ep.title else ""),
             "has_file": bool(ep.has_file),
             "is_past_or_today": ep.air_date <= today_str,
             "is_today": ep.air_date == today_str,
@@ -1115,7 +1209,7 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
         "drives": drives,
         "root_folders": root_folders,
         "active_tab": ("settings" if tab in ("media", "profiles", "indexers", "clients", "connect", "settings") else tab),
-        "settings_section": (tab if tab in ("media", "profiles", "indexers", "clients", "connect", "backup") else request.query_params.get("section", "media")),
+        "settings_section": (tab if tab in ("media", "profiles", "indexers", "clients", "connect", "backup", "features") else request.query_params.get("section", "media")),
         "is_overview": is_overview,
         "recent_movies": recent_movies,
         "recent_tv": recent_tv,
@@ -1333,6 +1427,16 @@ async def update_settings(request: Request, db: Session = Depends(get_db)):
         updates.setdefault("plex_notify_import", "false")
         updates.setdefault("jellyfin_notify", "false")
         updates.setdefault("emby_notify", "false")
+    if section == "features":
+        updates.setdefault("season_toggle_auto_search", "false")
+        updates.setdefault("reconcile_mark_missing_wanted", "false")
+        updates.setdefault("reconcile_sync_episodes", "false")
+        updates.setdefault("reconcile_import_untracked", "false")
+        updates.setdefault("post_import_auto_tdarr", "false")
+        updates.setdefault("post_import_scoped_refresh", "false")
+        updates.setdefault("prefer_hevc_upgrades", "false")
+        updates.setdefault("wanted_show_unmonitored", "false")
+        updates.setdefault("import_skip_extras", "false")
     save_settings(db, updates)
     return RedirectResponse(url=f"/?tab={section}&msg=Settings+saved", status_code=303)
 
@@ -1880,8 +1984,7 @@ async def test_service_connection(service: str, request: Request, db: Session = 
                 if r.status_code == 200:
                     ver = (r.json() or {}).get("version", "connected")
                     return {"ok": True, "message": f"Connected to Prowlarr (v{ver})"}
-                return {"ok": False, "message": f"Prowlarr returned HTTP {r.status_code} — verify API Key."}
-
+                return {"ok": False, "message": f"Prowlarr returned HTTP {r.status_code} — verify API Key."}"
             if svc in ("qbittorrent", "qbit"):
                 url = (payload.get("qbit_url") or cfg.get("qbit_url") or "").strip().rstrip("/")
                 user = (payload.get("qbit_user") or cfg.get("qbit_user") or "").strip()
@@ -1908,8 +2011,7 @@ async def test_service_connection(service: str, request: Request, db: Session = 
                 if r.status_code == 200:
                     ver = (r.json().get("MediaContainer") or {}).get("version", "connected")
                     return {"ok": True, "message": f"Connected to Plex Media Server (v{ver})"}
-                return {"ok": False, "message": f"Plex returned HTTP {r.status_code} — verify Plex Token."}
-
+                return {"ok": False, "message": f"Plex returned HTTP {r.status_code} — verify Plex Token."}"
             if svc == "jellyfin":
                 url = (payload.get("jellyfin_url") or cfg.get("jellyfin_url") or "").strip().rstrip("/")
                 key = (payload.get("jellyfin_api_key") or cfg.get("jellyfin_api_key") or "").strip()
@@ -1970,8 +2072,7 @@ async def api_library_bulk_action(request: Request, db: Session = Depends(get_db
         return {"ok": True, "message": f"Set monitored={flag} for {len(items)} items."}
     elif action == "move" and value:
         _asyncio.create_task(_bg_bulk_move(ids, value))
-        return {"ok": True, "message": f"Queued background drive move for {len(items)} items → {value}"}
-    elif action == "search":
+        return {"ok": True, "message": f"Queued background drive move for {len(items)} items → {value}"}"    elif action == "search":
         async def _bg_bulk_search(target_ids: list[int]):
             sdb = SessionLocal()
             try:
