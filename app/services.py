@@ -1997,6 +1997,128 @@ def _probe_video_file(fpath: Path, allow_ffprobe: bool = True) -> dict:
     return info
 
 
+def reconcile_library_db_and_disk(db: Session, apply: bool = False) -> dict:
+    cfg = get_settings(db)
+    mark_missing_wanted = (cfg.get("reconcile_mark_missing_wanted") or "true").lower() == "true"
+    sync_episodes = (cfg.get("reconcile_sync_episodes") or "true").lower() == "true"
+    import_untracked = (cfg.get("reconcile_import_untracked") or "false").lower() == "true"
+
+    video_exts = {".mkv", ".mp4", ".avi", ".m4v", ".ts", ".mov"}
+    items = db.query(MediaItem).all()
+    missing_items = []
+    tracked_roots = set()
+    tracked_files = set()
+
+    for it in items:
+        fp = (it.file_path or "").strip()
+        if fp:
+            p = Path(fp)
+            try:
+                tracked_roots.add(str(p.resolve()))
+            except Exception:
+                tracked_roots.add(str(p))
+            exists = False
+            try:
+                exists = p.exists()
+            except Exception:
+                exists = False
+            if exists:
+                try:
+                    if p.is_file():
+                        tracked_files.add(str(p.resolve()))
+                    else:
+                        for f in p.rglob("*"):
+                            if f.is_file() and f.suffix.lower() in video_exts and "sample" not in f.name.lower():
+                                tracked_files.add(str(f.resolve()))
+                except Exception:
+                    pass
+            elif it.status == "available":
+                missing_items.append({"id": it.id, "title": it.title, "media_type": it.media_type, "file_path": fp})
+                if apply and mark_missing_wanted:
+                    it.status = "wanted"
+
+        if sync_episodes and (it.media_type or "").lower() == "tv":
+            eps = db.query(EpisodeItem).filter_by(media_item_id=it.id).all()
+            for ep in eps:
+                ep_path = (getattr(ep, "file_path", None) or "").strip()
+                ep_exists = False
+                if ep_path:
+                    try:
+                        ep_exists = Path(ep_path).exists()
+                    except Exception:
+                        ep_exists = False
+                if getattr(ep, "on_disk", False) and not ep_exists:
+                    if apply:
+                        ep.on_disk = False
+                        ep.has_file = False
+                elif not getattr(ep, "on_disk", False) and ep_exists:
+                    if apply:
+                        ep.on_disk = True
+                        ep.has_file = True
+
+    untracked_folders = []
+    roots_map = get_media_roots(db)
+    for m_type, rlist in roots_map.items():
+        for r in rlist:
+            if not r.exists():
+                continue
+            try:
+                for child in sorted(r.iterdir(), key=lambda x: x.name.lower()):
+                    if not child.is_dir() or child.name.startswith("."):
+                        continue
+                    try:
+                        cres = str(child.resolve())
+                    except Exception:
+                        cres = str(child)
+                    if cres in tracked_roots:
+                        continue
+                    has_video = False
+                    checked = 0
+                    for f in child.rglob("*"):
+                        checked += 1
+                        if checked > 250:
+                            break
+                        if f.is_file() and f.suffix.lower() in video_exts and "sample" not in f.name.lower():
+                            has_video = True
+                            break
+                    if has_video:
+                        untracked_folders.append({"media_type": m_type, "title": child.name, "path": cres})
+                        if apply and import_untracked:
+                            existing_item = db.query(MediaItem).filter(MediaItem.file_path == cres).first()
+                            if not existing_item:
+                                db.add(MediaItem(
+                                    title=child.name,
+                                    media_type=m_type,
+                                    quality_profile=cfg.get(f"default_{m_type}_quality", "1080p"),
+                                    root_folder=str(r),
+                                    file_path=cres,
+                                    status="available",
+                                    monitored=True,
+                                ))
+                                tracked_roots.add(cres)
+            except Exception:
+                continue
+
+    if apply:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    return {
+        "applied": apply,
+        "missing_count": len(missing_items),
+        "missing_items": missing_items[:50],
+        "untracked_count": len(untracked_folders),
+        "untracked_folders": untracked_folders[:50],
+        "settings": {
+            "mark_missing_wanted": mark_missing_wanted,
+            "sync_episodes": sync_episodes,
+            "import_untracked": import_untracked,
+        },
+    }
+
+
 def run_library_health_audit(db: Session) -> dict:
     cfg = get_settings(db)
     items = db.query(MediaItem).filter_by(status="available").all()

@@ -140,7 +140,7 @@ from .services import (
     _find_local_poster_file,
     _search_plex_poster,
     _fetch_public_poster,
-    get_poster_candidates, fetch_media_metadata, move_media_folder, fetch_tautulli_activity, fetch_tautulli_watch_stats, run_library_health_audit, scan_franchise_collections, scan_existing_library, clean_media_title, _find_local_poster_file, build_clean_filename, record_history, send_notification
+    get_poster_candidates, fetch_media_metadata, move_media_folder, fetch_tautulli_activity, fetch_tautulli_watch_stats, run_library_health_audit, reconcile_library_db_and_disk, scan_franchise_collections, scan_existing_library, clean_media_title, _find_local_poster_file, build_clean_filename, record_history, send_notification
 )
 
 app = FastAPI(title="OmniArr", lifespan=lifespan)
@@ -1916,6 +1916,25 @@ def api_health_audit(force: bool = False, db: Session = Depends(get_db)):
     _AUDIT_CACHE["ts"] = now
     _AUDIT_CACHE["data"] = res
     return res
+
+
+@app.get("/api/health/reconcile")
+def api_health_reconcile_preview(db: Session = Depends(get_db)):
+    return reconcile_library_db_and_disk(db, apply=False)
+
+
+@app.post("/api/health/reconcile")
+def api_health_reconcile_apply(db: Session = Depends(get_db)):
+    res = reconcile_library_db_and_disk(db, apply=True)
+    _AUDIT_CACHE["ts"] = 0.0
+    _AUDIT_CACHE["data"] = None
+    record_history(
+        db,
+        "reconcile",
+        "Disk vs. DB Reconciliation",
+        detail=f"Missing: {res.get('missing_count', 0)}, Untracked folders: {res.get('untracked_count', 0)}",
+    )
+    return {"ok": True, **res}
 
 
 @app.post("/api/health/delete-orphan")

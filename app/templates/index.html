@@ -1835,6 +1835,53 @@
                 </div>
             </div>
 
+            <!-- Disk-vs.-DB Reconciliation -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                    <div>
+                        <h3 class="text-sm font-bold text-indigo-300">🔄 Disk-vs.-DB Reconciliation</h3>
+                        <p class="text-xs text-slate-400">Compare database library &amp; episode records against media root folders on disk and reconcile missing or untracked entries.</p>
+                    </div>
+                    <div class="flex items-center gap-2 text-xs">
+                        <button type="button" onclick="runReconcile(false)" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3.5 py-2 rounded-lg font-semibold">
+                            🔍 Preview Diff
+                        </button>
+                        <button type="button" onclick="runReconcile(true)" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-lg font-semibold">
+                            ⚡ Reconcile Now
+                        </button>
+                    </div>
+                </div>
+                <div id="health-reconcile-output" class="text-xs text-slate-400">Click <strong>Preview Diff</strong> or <strong>Reconcile Now</strong> to audit disk paths against the database.</div>
+            </div>
+            <script>
+            async function runReconcile(apply) {
+                const box = document.getElementById("health-reconcile-output");
+                if (!box) return;
+                box.innerHTML = `<span class="text-indigo-300">${apply ? "Reconciling disk &amp; database..." : "Scanning disk vs. database diff..."}</span>`;
+                try {
+                    const resp = await fetch("/api/health/reconcile", {
+                        method: apply ? "POST" : "GET",
+                        headers: { "Content-Type": "application/json" }
+                    });
+                    const data = await resp.json();
+                    const missing = data.missing_items || [];
+                    const untracked = data.untracked_folders || [];
+                    const badge = data.applied
+                        ? `<div class="mb-2 px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-semibold">Reconciliation applied — Missing marked/checked: ${data.missing_count || 0}, Untracked folders: ${data.untracked_count || 0}</div>`
+                        : `<div class="mb-2 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700 text-slate-200">Diff preview — Missing on disk: <strong>${data.missing_count || 0}</strong> • Untracked folders on disk: <strong>${data.untracked_count || 0}</strong></div>`;
+                    const missHtml = missing.length
+                        ? `<div class="mt-2"><div class="font-semibold text-amber-300 mb-1">Missing Files on Disk (${missing.length})</div><ul class="list-disc pl-5 space-y-0.5 text-slate-300">${missing.slice(0, 10).map(m => `<li><span class="font-medium">${m.title}</span> <span class="font-mono text-slate-400">[${m.file_path}]</span></li>`).join("")}</ul></div>`
+                        : "";
+                    const unHtml = untracked.length
+                        ? `<div class="mt-2"><div class="font-semibold text-indigo-300 mb-1">Untracked Folders on Disk (${untracked.length})</div><ul class="list-disc pl-5 space-y-0.5 text-slate-300">${untracked.slice(0, 10).map(u => `<li><span class="uppercase text-slate-400">[${u.media_type}]</span> <span class="font-mono text-slate-200">${u.path}</span></li>`).join("")}</ul></div>`
+                        : "";
+                    box.innerHTML = badge + missHtml + unHtml;
+                } catch (err) {
+                    box.innerHTML = `<span class="text-rose-400">Reconciliation failed: ${err}</span>`;
+                }
+            }
+            </script>
+
             <!-- Tautulli Unwatched / Stale Media Cleanup -->
             <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6">
                 <h3 class="text-sm font-bold text-amber-300 mb-1">📺 Tautulli Watch History &amp; Stale Media (Unwatched 12+ Months)</h3>
