@@ -225,6 +225,14 @@
                                     class="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-2 py-1 rounded text-xs font-medium transition">
                                 📋 Pick
                             </button>
+                            {% if (item.media_type or '')|lower == 'tv' %}
+                            <button type="button" data-title="{{ item.title }}" data-monitored-seasons="{{ item.monitored_seasons or '[]' }}"
+                                    onclick="openSeasonManager({{ item.id }}, this.dataset.title, this.dataset.monitoredSeasons)"
+                                    title="Manage season monitoring and search seasons or episodes"
+                                    class="bg-slate-800 hover:bg-indigo-600/40 text-indigo-300 border border-slate-700 hover:border-indigo-500/50 px-2 py-1 rounded text-xs font-medium transition">
+                                📺 Seasons
+                            </button>
+                            {% endif %}
                             {% if item.status == 'downloading' %}
                             <button type="button" onclick="forceImportCard(this, {{ item.id }})"
                                     title="Import completed torrent into library now"
@@ -2156,6 +2164,225 @@ async function toggleAutomationSetting(key, enabled) {
             input.dispatchEvent(new Event("change", { bubbles: true }));
         }
         closeFolderBrowser();
+    }
+    </script>
+
+
+    <!-- SEASON & EPISODE MANAGER MODAL -->
+    <div id="season-manager-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
+            <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between gap-3">
+                <div>
+                    <h3 id="sm-modal-title" class="text-base font-bold text-indigo-300">Season &amp; Episode Manager</h3>
+                    <p id="sm-modal-subtitle" class="text-xs text-slate-400">Toggle season monitoring or search individual seasons and episodes</p>
+                </div>
+                <button type="button" onclick="closeSeasonManager()" class="text-slate-400 hover:text-white text-sm px-2 py-1">✕</button>
+            </div>
+            <div id="sm-modal-status" class="hidden px-5 py-2 text-xs border-b border-slate-800 bg-slate-950/80 text-emerald-300"></div>
+            <div id="sm-modal-body" class="p-4 overflow-y-auto space-y-3 text-xs flex-1">
+                <div class="text-slate-400 text-center py-6">Loading seasons and episodes...</div>
+            </div>
+            <div class="px-5 py-3 border-t border-slate-800 bg-slate-950/60 flex items-center justify-end">
+                <button type="button" onclick="closeSeasonManager()" class="bg-slate-800 hover:bg-slate-700 px-4 py-1.5 rounded-lg text-xs font-medium text-slate-200">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    let _smItemId = null;
+    let _smTitle = "";
+    let _smMonitored = new Set();
+
+    function _parseMonitoredSeasons(raw) {
+        try {
+            const arr = typeof raw === "string" ? JSON.parse(raw || "[]") : (raw || []);
+            return new Set((Array.isArray(arr) ? arr : []).map(n => parseInt(n, 10)).filter(n => !Number.isNaN(n)));
+        } catch (_e) {
+            return new Set();
+        }
+    }
+
+    function _setSmStatus(msg, isErr = false) {
+        const el = document.getElementById("sm-modal-status");
+        if (!el) return;
+        el.textContent = msg;
+        el.className = `px-5 py-2 text-xs border-b border-slate-800 ${isErr ? "bg-rose-950/50 text-rose-300" : "bg-emerald-950/40 text-emerald-300"}`;
+        el.classList.remove("hidden");
+    }
+
+    async function openSeasonManager(itemId, title, monitoredRaw) {
+        _smItemId = itemId;
+        _smTitle = title || `Show #${itemId}`;
+        _smMonitored = _parseMonitoredSeasons(monitoredRaw);
+        document.getElementById("sm-modal-title").textContent = `📺 ${_smTitle}`;
+        document.getElementById("sm-modal-subtitle").textContent = "Toggle season monitoring or search a single season / episode";
+        const st = document.getElementById("sm-modal-status");
+        if (st) st.classList.add("hidden");
+        const body = document.getElementById("sm-modal-body");
+        body.innerHTML = `<div class="text-slate-400 text-center py-6">Loading seasons &amp; episodes...</div>`;
+        document.getElementById("season-manager-modal").classList.remove("hidden");
+
+        try {
+            const resp = await fetch(`/api/media/${itemId}/seasons`);
+            const data = await resp.json();
+            const seasons = Array.isArray(data.seasons) ? data.seasons : [];
+            renderSeasonManager(seasons);
+        } catch (err) {
+            body.innerHTML = `<div class="text-rose-400 text-center py-6">Failed to load seasons: ${err}</div>`;
+        }
+    }
+
+    function closeSeasonManager() {
+        const modal = document.getElementById("season-manager-modal");
+        if (modal) modal.classList.add("hidden");
+    }
+
+    function renderSeasonManager(seasons) {
+        const body = document.getElementById("sm-modal-body");
+        if (!seasons.length) {
+            body.innerHTML = `<div class="text-slate-400 text-center py-6">No season data returned for ${_smTitle}.</div>`;
+            return;
+        }
+        body.innerHTML = seasons.map(s => {
+            const sNum = parseInt(s.season_number ?? s.season ?? 0, 10);
+            const isMon = _smMonitored.has(sNum);
+            const eps = Array.isArray(s.episodes) ? s.episodes : [];
+            const epRows = eps.map(ep => {
+                const eNum = parseInt(ep.episode_number ?? ep.episode ?? 0, 10);
+                const epTitle = ep.title || ep.name || "";
+                const onDisk = Boolean(ep.on_disk || ep.file);
+                return `
+                    <div class="flex items-center justify-between gap-2 py-1.5 px-3 rounded bg-slate-900/80 border border-slate-800/80">
+                        <div class="min-w-0 flex items-center gap-2">
+                            <span class="font-mono text-[11px] text-indigo-300 shrink-0">S${String(sNum).padStart(2, "0")}E${String(eNum).padStart(2, "0")}</span>
+                            <span class="text-slate-200 truncate">${epTitle || `Episode ${eNum}`}</span>
+                            ${onDisk ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700/40 shrink-0">On Disk</span>` : `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 shrink-0">Missing</span>`}
+                        </div>
+                        <div class="flex items-center gap-1.5 shrink-0">
+                            <button type="button" onclick="searchSingleEpisode(${_smItemId}, ${sNum}, ${eNum}, true)"
+                                    class="px-2 py-0.5 rounded bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-[11px]">
+                                Auto
+                            </button>
+                            <button type="button" onclick="openEpisodeManualSearch(${_smItemId}, ${sNum}, ${eNum})"
+                                    class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[11px]">
+                                Pick
+                            </button>
+                        </div>
+                    </div>`;
+            }).join("");
+
+            return `
+                <details class="rounded-xl border border-slate-800 bg-slate-950/70 overflow-hidden" ${sNum === seasons[seasons.length - 1]?.season_number ? "open" : ""}>
+                    <summary class="px-3.5 py-2.5 cursor-pointer flex items-center justify-between gap-3 bg-slate-900/70 hover:bg-slate-900 select-none">
+                        <div class="flex items-center gap-2.5" onclick="event.stopPropagation()">
+                            <input type="checkbox" class="accent-indigo-500 w-4 h-4 rounded"
+                                   ${isMon ? "checked" : ""}
+                                   onchange="toggleSeasonMonitor(${_smItemId}, ${sNum}, this.checked)">
+                            <span class="font-semibold text-slate-100">Season ${sNum}</span>
+                            <span class="text-[11px] text-slate-400">${eps.length} ep${eps.length === 1 ? "" : "s"}</span>
+                        </div>
+                        <div class="flex items-center gap-1.5" onclick="event.stopPropagation()">
+                            <button type="button" onclick="searchSingleSeason(${_smItemId}, ${sNum}, true)"
+                                    class="px-2.5 py-1 rounded bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-[11px] font-medium">
+                                🔍 Search Season
+                            </button>
+                            <button type="button" onclick="openSeasonManualSearch(${_smItemId}, ${sNum})"
+                                    class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[11px]">
+                                📋 Pick
+                            </button>
+                        </div>
+                    </summary>
+                    <div class="p-2.5 space-y-1.5 max-h-60 overflow-y-auto">
+                        ${epRows || `<div class="text-slate-400 text-center py-2">No episode rows in this season.</div>`}
+                    </div>
+                </details>`;
+        }).join("");
+    }
+
+    async function toggleSeasonMonitor(itemId, seasonNum, monitored) {
+        try {
+            const resp = await fetch(`/api/media/${itemId}/seasons/monitor`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ season: seasonNum, monitored: Boolean(monitored) })
+            });
+            const data = await resp.json();
+            if (!resp.ok || data.ok === false) {
+                _setSmStatus(data.detail || "Failed to update season monitor state", true);
+                return;
+            }
+            _smMonitored = _parseMonitoredSeasons(data.monitored_seasons || []);
+            const cardBtn = document.querySelector(`button[onclick*="openSeasonManager(${itemId},"]`);
+            if (cardBtn) cardBtn.dataset.monitoredSeasons = JSON.stringify(data.monitored_seasons || []);
+            const extra = data.search?.grabbed ? ` • Grabbed: ${data.search.grabbed}` : "";
+            _setSmStatus(`Season ${seasonNum} set to ${monitored ? "monitored" : "unmonitored"}${extra}`);
+        } catch (err) {
+            _setSmStatus(`Error toggling season monitor: ${err}`, true);
+        }
+    }
+
+    async function searchSingleSeason(itemId, seasonNum, autoGrab = true) {
+        const tag = `S${String(seasonNum).padStart(2, "0")}`;
+        _setSmStatus(`Searching Prowlarr for ${_smTitle} ${tag}...`);
+        try {
+            const resp = await fetch(`/api/media/${itemId}/seasons/${seasonNum}/search?auto_grab=${autoGrab ? "true" : "false"}`, {
+                method: "POST"
+            });
+            const data = await resp.json();
+            if (data.status === "grabbed") {
+                _setSmStatus(`Grabbed season release: ${data.release || `${_smTitle} ${tag}`}`);
+            } else if (data.status === "no_results") {
+                _setSmStatus(`No releases found for ${_smTitle} ${tag}`, true);
+            } else {
+                _setSmStatus(data.detail || `Season search finished (${data.status || "done"})`, data.ok === false);
+            }
+        } catch (err) {
+            _setSmStatus(`Season search error: ${err}`, true);
+        }
+    }
+
+    async function searchSingleEpisode(itemId, seasonNum, epNum, autoGrab = true) {
+        const tag = `S${String(seasonNum).padStart(2, "0")}E${String(epNum).padStart(2, "0")}`;
+        _setSmStatus(`Searching Prowlarr for ${_smTitle} ${tag}...`);
+        try {
+            const resp = await fetch(`/api/media/${itemId}/episodes/${seasonNum}/${epNum}/search?auto_grab=${autoGrab ? "true" : "false"}`, {
+                method: "POST"
+            });
+            const data = await resp.json();
+            if (data.status === "grabbed") {
+                _setSmStatus(`Grabbed episode release: ${data.release || `${_smTitle} ${tag}`}`);
+            } else if (data.status === "no_results") {
+                _setSmStatus(`No releases found for ${_smTitle} ${tag}`, true);
+            } else {
+                _setSmStatus(data.detail || `Episode search finished (${data.status || "done"})`, data.ok === false);
+            }
+        } catch (err) {
+            _setSmStatus(`Episode search error: ${err}`, true);
+        }
+    }
+
+    function openSeasonManualSearch(itemId, seasonNum) {
+        const q = `${_smTitle} S${String(seasonNum).padStart(2, "0")}`;
+        if (typeof openManualSearch === "function") {
+            openManualSearch(itemId, q);
+            const inp = document.getElementById("ms-custom-query");
+            if (inp) {
+                inp.value = q;
+                if (typeof runManualSearchQuery === "function") runManualSearchQuery();
+            }
+        }
+    }
+
+    function openEpisodeManualSearch(itemId, seasonNum, epNum) {
+        const q = `${_smTitle} S${String(seasonNum).padStart(2, "0")}E${String(epNum).padStart(2, "0")}`;
+        if (typeof openManualSearch === "function") {
+            openManualSearch(itemId, q);
+            const inp = document.getElementById("ms-custom-query");
+            if (inp) {
+                inp.value = q;
+                if (typeof runManualSearchQuery === "function") runManualSearchQuery();
+            }
+        }
     }
     </script>
 

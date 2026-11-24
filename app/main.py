@@ -2194,3 +2194,199 @@ async def api_health_queue_tdarr(request: Request, db: Session = Depends(get_db)
             return {"ok": False, "message": f"Tdarr returned HTTP {resp.status_code}"}
     except Exception as exc:
         return {"ok": False, "message": f"Tdarr connection error: {exc}"}
+
+
+# === SEASON & EPISODE MANAGER ENDPOINTS ===
+from pydantic import BaseModel as _PydanticBaseModel
+
+class SeasonMonitorPayload(_PydanticBaseModel):
+    season: int
+    monitored: bool
+    auto_search: bool | None = None
+
+
+def _get_monitored_seasons_set(item: MediaItem) -> set[int]:
+    return set(_tv_monitored_season_list(item))
+
+
+def _save_monitored_seasons_set(item: MediaItem, s_set: set[int]) -> list[int]:
+    ordered = sorted({int(x) for x in s_set if int(x) >= 0})
+    item.monitored_seasons = _json.dumps(ordered)
+    return ordered
+
+
+@app.post("/api/media/{item_id}/seasons/monitor")
+async def api_toggle_season_monitor(
+    item_id: int,
+    payload: SeasonMonitorPayload,
+    db: Session = Depends(get_db),
+):
+    item = db.query(MediaItem).filter(MediaItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    s_num = int(payload.season)
+    mon_set = _get_monitored_seasons_set(item)
+    if payload.monitored:
+        mon_set.add(s_num)
+    else:
+        mon_set.discard(s_num)
+    updated_seasons = _save_monitored_seasons_set(item, mon_set)
+    db.add(HistoryEvent(
+        event_type="monitor",
+        media_item_id=item.id,
+        title=f"{item.title} S{s_num:02d}",
+        detail=f"Season {s_num} marked as {"monitored" if payload.monitored else "unmonitored"}.",
+    ))
+    db.commit()
+    db.refresh(item)
+
+    cfg = get_settings_map(db)
+    should_auto = (
+        payload.auto_search
+        if payload.auto_search is not None
+        else ((cfg.get("season_toggle_auto_search") or "false").lower() == "true")
+    )
+    search_result = None
+    if payload.monitored and should_auto:
+        q = f"{item.title} S{s_num:02d}"
+        releases = await search_prowlarr(q, item.media_type or "tv", item.quality_profile, db)
+        grabbed_title = None
+        if releases:
+            best = releases[0]
+            dl_link = best.get("downloadUrl") or best.get("magnetUrl") or best.get("guid")
+            t_hash = await send_to_qbittorrent(dl_link, item.id, db) if dl_link else None
+            if t_hash:
+                item.torrent_hash = t_hash
+                item.status = "downloading"
+                grabbed_title = best.get("title") or q
+                db.add(HistoryEvent(
+                    event_type="grab",
+                    media_item_id=item.id,
+                    title=q,
+                    detail=f"Auto-search on monitor toggle grabbed: {grabbed_title}",
+                ))
+                db.commit()
+        search_result = {
+            "query": q,
+            "results_count": len(releases or []),
+            "grabbed": grabbed_title,
+        }
+
+    return {
+        "ok": True,
+        "item_id": item.id,
+        "season": s_num,
+        "monitored": bool(payload.monitored),
+        "monitored_seasons": updated_seasons,
+        "search": search_result,
+    }
+
+
+@app.post("/api/media/{item_id}/seasons/{season_num}/search")
+async def api_search_single_season(
+    item_id: int,
+    season_num: int,
+    auto_grab: bool = True,
+    db: Session = Depends(get_db),
+):
+    item = db.query(MediaItem).filter(MediaItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    tag = f"S{int(season_num):02d}"
+    query = f"{item.title} {tag}"
+    releases = await search_prowlarr(query, item.media_type or "tv", item.quality_profile, db)
+    if not auto_grab:
+        return {
+            "ok": True,
+            "status": "found",
+            "query": query,
+            "releases": releases or [],
+        }
+    if not releases:
+        db.add(HistoryEvent(
+            event_type="search",
+            media_item_id=item.id,
+            title=query,
+            detail=f"Season search returned 0 releases for {query}.",
+        ))
+        db.commit()
+        return {"ok": True, "status": "no_results", "query": query, "releases": []}
+
+    best = releases[0]
+    dl_link = best.get("downloadUrl") or best.get("magnetUrl") or best.get("guid")
+    t_hash = await send_to_qbittorrent(dl_link, item.id, db) if dl_link else None
+    if t_hash:
+        item.torrent_hash = t_hash
+        item.status = "downloading"
+        rel_title = best.get("title") or query
+        db.add(HistoryEvent(
+            event_type="grab",
+            media_item_id=item.id,
+            title=query,
+            detail=f"Season search grabbed: {rel_title}",
+        ))
+        db.commit()
+        return {
+            "ok": True,
+            "status": "grabbed",
+            "query": query,
+            "release": rel_title,
+            "torrent_hash": t_hash,
+        }
+    return {"ok": False, "status": "failed", "query": query, "releases": releases[:10]}
+
+
+@app.post("/api/media/{item_id}/episodes/{season_num}/{ep_num}/search")
+async def api_search_single_episode(
+    item_id: int,
+    season_num: int,
+    ep_num: int,
+    auto_grab: bool = True,
+    db: Session = Depends(get_db),
+):
+    item = db.query(MediaItem).filter(MediaItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    tag = f"S{int(season_num):02d}E{int(ep_num):02d}"
+    query = f"{item.title} {tag}"
+    releases = await search_prowlarr(query, item.media_type or "tv", item.quality_profile, db)
+    if not auto_grab:
+        return {
+            "ok": True,
+            "status": "found",
+            "query": query,
+            "releases": releases or [],
+        }
+    if not releases:
+        db.add(HistoryEvent(
+            event_type="search",
+            media_item_id=item.id,
+            title=query,
+            detail=f"Episode search returned 0 releases for {query}.",
+        ))
+        db.commit()
+        return {"ok": True, "status": "no_results", "query": query, "releases": []}
+
+    best = releases[0]
+    dl_link = best.get("downloadUrl") or best.get("magnetUrl") or best.get("guid")
+    t_hash = await send_to_qbittorrent(dl_link, item.id, db) if dl_link else None
+    if t_hash:
+        item.torrent_hash = t_hash
+        if item.status != "available":
+            item.status = "downloading"
+        rel_title = best.get("title") or query
+        db.add(HistoryEvent(
+            event_type="grab",
+            media_item_id=item.id,
+            title=query,
+            detail=f"Episode search grabbed: {rel_title}",
+        ))
+        db.commit()
+        return {
+            "ok": True,
+            "status": "grabbed",
+            "query": query,
+            "release": rel_title,
+            "torrent_hash": t_hash,
+        }
+    return {"ok": False, "status": "failed", "query": query, "releases": releases[:10]}
