@@ -1028,7 +1028,7 @@ def api_unblacklist_release(bl_id: int, db: Session = Depends(get_db)):
     return {"status": "removed"}
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", q: str = "", media_type: str = "", page: int = 1, msg: str = "", db: Session = Depends(get_db)):
+def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", q: str = "", media_type: str = "", status_filter: str = "all", page: int = 1, msg: str = "", db: Session = Depends(get_db)):
     base_q = db.query(MediaItem)
     search_q = q.strip()
     if search_q:
@@ -1051,7 +1051,7 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
     total_tv = tv_q.count()
     total_items = total_movies + total_tv
 
-    is_overview = (tab == "library" and not search_q and media_type not in ("movie", "tv"))
+    is_overview = (tab == "library" and not search_q and media_type not in ("movie", "tv") and (status_filter or "all").strip().lower() in ("", "all"))
 
     # Latest 10 added movies
     recent_movies = (
@@ -1077,15 +1077,23 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
         .all()
     )
 
+    norm_status = (status_filter or "all").strip().lower()
+    if norm_status not in ("all", "have", "wanted"):
+        norm_status = "all"
+
     if media_type == "movie":
         active_q = movie_q
-        active_total = total_movies
     elif media_type == "tv":
         active_q = tv_q
-        active_total = total_tv
     else:
         active_q = base_q
-        active_total = total_items
+
+    if norm_status == "have":
+        active_q = active_q.filter(MediaItem.status == "available")
+    elif norm_status == "wanted":
+        active_q = active_q.filter(MediaItem.status != "available")
+
+    active_total = active_q.count()
 
     total_pages = max(1, (max(active_total, 1) + per_page - 1) // per_page)
     page = max(1, min(page, total_pages))
@@ -1266,6 +1274,7 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
         "have_items": have_items,
         "wanted_items": wanted_items,
         "sort": sort,
+        "status_filter": norm_status,
         "q": search_q,
         "media_type": media_type,
         "page": page,
