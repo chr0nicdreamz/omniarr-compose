@@ -872,7 +872,7 @@ async def restore_db_backup(db_file_upload: UploadFile = File(...), db: Session 
     shutil.move(tmp.name, target_db)
     for ext in ("-wal", "-shm"):
         Path(f"{target_db}{ext}").unlink(missing_ok=True)
-    record_history(db, "settings", "Database Restored", f"Restored SQLite DB from {db_file_upload.filename or "upload"}; safety copy at {safety_copy.name}")
+    record_history(db, "settings", "Database Restored", f"Restored SQLite DB from {db_file_upload.filename or 'upload'}; safety copy at {safety_copy.name}")
     return {"ok": True, "restored_to": str(target_db), "safety_backup": str(safety_copy), "restart_recommended": True}
 
 
@@ -885,8 +885,7 @@ async def _bg_sync_calendar():
             "calendar_sync",
             "Calendar Air-Date Sync",
             "done",
-            f"Checked {res.get('shows_checked', 0)} shows • Updated {res.get('updated_episodes', 0)} eps, {res.get('updated_movies', 0)} movies",
-        )
+            f"Checked {res.get('shows_checked', 0)} shows • Updated {res.get('updated_episodes', 0)} eps, {res.get('updated_movies', 0)} movies","        )
     except Exception as e:
         _update_bg_task("calendar_sync", "Calendar Air-Date Sync", "error", str(e))
     finally:
@@ -1157,7 +1156,7 @@ def dashboard(request: Request, tab: str = "library", sort: str = "added_desc", 
             "media_id": show.id,
             "date": ep.air_date,
             "title": show.title,
-            "subtitle": f"S{ep.season_number:02d}E{ep.episode_number:02d}" + (f" • {ep.title}" if ep.title else ""),
+            "subtitle": f"S{ep.season_number:02d}E{ep.episode_number:02d}" + (f" • {ep.title}" "f ep.title else ""),
             "has_file": bool(ep.has_file),
             "is_past_or_today": ep.air_date <= today_str,
             "is_today": ep.air_date == today_str,
@@ -1985,8 +1984,7 @@ async def test_service_connection(service: str, request: Request, db: Session = 
                 if r.status_code == 200:
                     ver = (r.json() or {}).get("version", "connected")
                     return {"ok": True, "message": f"Connected to Prowlarr (v{ver})"}
-                return {"ok": False, "message": f"Prowlarr returned HTTP {r.status_code} — verify API Key."}
-
+                return {"ok": False, "message": f"Prowlarr returned HTTP {r.status_code} — verify API Key."}"
             if svc in ("qbittorrent", "qbit"):
                 url = (payload.get("qbit_url") or cfg.get("qbit_url") or "").strip().rstrip("/")
                 user = (payload.get("qbit_user") or cfg.get("qbit_user") or "").strip()
@@ -2013,8 +2011,7 @@ async def test_service_connection(service: str, request: Request, db: Session = 
                 if r.status_code == 200:
                     ver = (r.json().get("MediaContainer") or {}).get("version", "connected")
                     return {"ok": True, "message": f"Connected to Plex Media Server (v{ver})"}
-                return {"ok": False, "message": f"Plex returned HTTP {r.status_code} — verify Plex Token."}
-
+                return {"ok": False, "message": f"Plex returned HTTP {r.status_code} — verify Plex Token."}"
             if svc == "jellyfin":
                 url = (payload.get("jellyfin_url") or cfg.get("jellyfin_url") or "").strip().rstrip("/")
                 key = (payload.get("jellyfin_api_key") or cfg.get("jellyfin_api_key") or "").strip()
@@ -2075,8 +2072,7 @@ async def api_library_bulk_action(request: Request, db: Session = Depends(get_db
         return {"ok": True, "message": f"Set monitored={flag} for {len(items)} items."}
     elif action == "move" and value:
         _asyncio.create_task(_bg_bulk_move(ids, value))
-        return {"ok": True, "message": f"Queued background drive move for {len(items)} items → {value}"}
-    elif action == "search":
+        return {"ok": True, "message": f"Queued background drive move for {len(items)} items → {value}"}"    elif action == "search":
         async def _bg_bulk_search(target_ids: list[int]):
             sdb = SessionLocal()
             try:

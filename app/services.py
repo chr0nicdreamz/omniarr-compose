@@ -287,8 +287,7 @@ def _find_local_poster_file(file_path: str | None) -> Path | None:
         db.add(HistoryEvent(
             event_type="search",
             title=f"{query} ({media_type.upper()})",
-            detail=f"{len(None)} result(s) • Top: {top_title[:140]}",
-        ))
+            detail=f"{len(None)} result(s) • Top: {top_title[:140]}","        ))
         # Prune search/history logs older than 30 days
         cutoff_30d = _dt.utcnow() - _td(days=30)
         db.query(HistoryEvent).filter(HistoryEvent.created_at < cutoff_30d).delete()
@@ -821,7 +820,7 @@ async def fetch_media_metadata(item: MediaItem, cfg: dict) -> dict:
                                         meta["reviews"].append({
                                             "source": "Apple TV / iTunes",
                                             "author": author,
-                                            "rating": f"{stars}/5 ★" if stars else "",
+                                            "rating": f"{stars}/5 ★" "f stars else "",
                                             "is_critic": False,
                                             "content": full_txt[:700],
                                         })
@@ -877,7 +876,7 @@ async def fetch_media_metadata(item: MediaItem, cfg: dict) -> dict:
                                     meta["reviews"].append({
                                         "source": "TMDB Community",
                                         "author": r_author,
-                                        "rating": f"{r_rating}/10 ★" if r_rating else "",
+                                        "rating": f"{r_rating}/10 ★" "f r_rating else "",
                                         "is_critic": False,
                                         "content": r_body[:750],
                                     })
