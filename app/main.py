@@ -744,7 +744,7 @@ async def import_settings_json(settings_file: UploadFile = File(...), db: Sessio
     if not isinstance(data, dict) or not isinstance(data.get("settings"), dict):
         raise HTTPException(status_code=400, detail="JSON must contain a top-level settings object.")
     save_settings(db, data["settings"])
-    record_history(db, "settings", "Settings Restored", f"Imported settings from {settings_file.filename or "json"}")
+    record_history(db, "settings", "Settings Restored", f"Imported settings from {settings_file.filename or 'json'}")
     return {"ok": True, "imported_keys": len(data["settings"])}
 
 
