@@ -147,7 +147,7 @@
                         <input type="checkbox" value="{{ item.id }}" onchange="toggleBulkCard(this)" class="omni-bulk-cb w-3.5 h-3.5 rounded accent-indigo-500 cursor-pointer">
                     </label>
                     {% if item.poster_url %}
-                    <img loading="lazy" decoding="async" src="{{ item.poster_url }}" alt="{{ item.title }}" class="w-full h-full object-cover" loading="lazy">
+                    <img loading="lazy" decoding="async" src="{{ item.poster_url }}" alt="{{ item.title }}" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer" data-orig-src="{{ item.poster_url }}" onerror="window.omniHandlePosterImgError(this)">
                     {% else %}
                     <div class="w-full h-full flex flex-col items-center justify-center p-3 text-center bg-gradient-to-br from-slate-800 to-slate-900">
                         <span class="text-xs uppercase tracking-wider text-slate-500 font-bold">{{ item.media_type }}</span>
@@ -611,15 +611,16 @@
                 {% endif %}
             </div>
 
-            <div class="space-y-2.5">
-                <div class="flex items-center justify-between">
+            <details id="details-wanted-movies" class="rounded-xl border border-slate-800/90 bg-slate-900/40 p-3.5 space-y-3" open>
+                <summary class="cursor-pointer list-none flex items-center justify-between select-none">
                     <h3 class="text-sm font-semibold text-amber-300 flex items-center gap-2">
                         <span>🎯 Movies — Wanted</span>
                         <span class="text-[11px] font-normal text-amber-200/80 bg-amber-950/50 border border-amber-700/40 px-2 py-0.5 rounded-full">{{ wanted_movies_count }}</span>
                     </h3>
-                </div>
+                    <span class="text-[11px] text-slate-400 hover:text-slate-200">Toggle Wanted</span>
+                </summary>
                 {% if wanted_movies %}
-                <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
+                <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5 pt-1">
                     {% for item in wanted_movies %}
                         {{ render_card(item) }}
                     {% endfor %}
@@ -627,7 +628,7 @@
                 {% else %}
                 <div class="text-xs text-slate-400 bg-slate-900/50 border border-slate-800/80 rounded-xl px-4 py-3">No wanted movies queued right now.</div>
                 {% endif %}
-            </div>
+            </details>
         </section>
 
         <!-- HOME OVERVIEW: TV SHOWS (WHAT YOU HAVE vs WANTED) -->
@@ -659,15 +660,16 @@
                 {% endif %}
             </div>
 
-            <div class="space-y-2.5">
-                <div class="flex items-center justify-between">
+            <details id="details-wanted-tv" class="rounded-xl border border-slate-800/90 bg-slate-900/40 p-3.5 space-y-3" open>
+                <summary class="cursor-pointer list-none flex items-center justify-between select-none">
                     <h3 class="text-sm font-semibold text-amber-300 flex items-center gap-2">
                         <span>🎯 TV Shows — Wanted</span>
                         <span class="text-[11px] font-normal text-amber-200/80 bg-amber-950/50 border border-amber-700/40 px-2 py-0.5 rounded-full">{{ wanted_tv_count }}</span>
                     </h3>
-                </div>
+                    <span class="text-[11px] text-slate-400 hover:text-slate-200">Toggle Wanted</span>
+                </summary>
                 {% if wanted_tv %}
-                <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
+                <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5 pt-1">
                     {% for item in wanted_tv %}
                         {{ render_card(item) }}
                     {% endfor %}
@@ -675,7 +677,7 @@
                 {% else %}
                 <div class="text-xs text-slate-400 bg-slate-900/50 border border-slate-800/80 rounded-xl px-4 py-3">No wanted TV shows queued right now.</div>
                 {% endif %}
-            </div>
+            </details>
         </section>
         {% else %}
         <!-- PAGINATED DRILL-DOWN LIBRARY VIEW (SPLIT HAVE vs WANTED) -->
@@ -705,10 +707,13 @@
                 {% endif %}
             </div>
 
-            <div class="space-y-2.5">
-                <h3 class="text-sm font-semibold text-amber-300">🎯 Wanted ({{ wanted_items|length }})</h3>
+            <details id="details-wanted-drilldown" class="rounded-xl border border-slate-800/90 bg-slate-900/40 p-3.5 space-y-3" open>
+                <summary class="cursor-pointer list-none flex items-center justify-between select-none">
+                    <h3 class="text-sm font-semibold text-amber-300">🎯 Wanted ({{ wanted_items|length }})</h3>
+                    <span class="text-[11px] text-slate-400 hover:text-slate-200">Toggle Wanted</span>
+                </summary>
                 {% if wanted_items %}
-                <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5">
+                <div class="omni-poster-grid grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10 gap-3.5 pt-1">
                     {% for item in wanted_items %}
                         {{ render_card(item) }}
                     {% endfor %}
@@ -716,7 +721,7 @@
                 {% else %}
                 <div class="text-xs text-slate-400 bg-slate-900/50 border border-slate-800/80 rounded-xl px-4 py-3">No matching items in Wanted on this page.</div>
                 {% endif %}
-            </div>
+            </details>
             <div class="mt-6 flex items-center justify-between bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl text-xs">
                 <span class="text-slate-400">Showing page {{ page }} of {{ total_pages }}</span>
                 <div class="flex gap-2">
@@ -2468,6 +2473,47 @@ async function toggleAutomationSetting(key, enabled) {
         }
     }
     </script>
+
+
+<script>
+(function() {
+  const ids = ["details-wanted-movies", "details-wanted-tv", "details-wanted-drilldown"];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const saved = localStorage.getItem("omniarr_collapse_" + id);
+    if (saved === "collapsed") el.removeAttribute("open");
+    else if (saved === "open") el.setAttribute("open", "");
+    el.addEventListener("toggle", () => {
+      localStorage.setItem("omniarr_collapse_" + id, el.open ? "open" : "collapsed");
+    });
+  });
+})();
+</script>
+
+
+<script>
+window.omniHandlePosterImgError = function(imgEl) {
+  if (!imgEl || imgEl.dataset.proxyTried === "1") {
+    if (imgEl) {
+      imgEl.dataset.failed = "1";
+      const box = imgEl.closest("[data-poster-card]") || imgEl.parentElement;
+      if (box && !box.querySelector(".omni-poster-fallback-msg")) {
+        const badge = document.createElement("div");
+        badge.className = "omni-poster-fallback-msg mt-1 text-[10px] text-amber-300";
+        badge.textContent = "Image blocked/unavailable — paste URL above";
+        box.appendChild(badge);
+      }
+    }
+    return;
+  }
+  imgEl.dataset.proxyTried = "1";
+  const raw = imgEl.dataset.origSrc || imgEl.getAttribute("src") || "";
+  if (raw) {
+    imgEl.src = "/api/poster-proxy?url=" + encodeURIComponent(raw);
+  }
+};
+</script>
 
 </body>
 </html>

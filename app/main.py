@@ -249,7 +249,17 @@ async def api_media_poster_candidates(item_id: int, db: Session = Depends(get_db
     item = db.query(MediaItem).filter(MediaItem.id == item_id).first()
     if not item:
         return {"candidates": []}
-    cands = await get_poster_candidates(db, item)
+    try:
+        cands = await get_poster_candidates(db, item)
+    except Exception as exc:
+        cands = []
+        if getattr(item, "poster_url", None):
+            cands.append({"source": "Current", "label": item.title or "Current Poster", "url": item.poster_url})
+        return {"candidates": cands, "warning": str(exc)}
+    if not isinstance(cands, list):
+        cands = []
+    if not cands and getattr(item, "poster_url", None):
+        cands.append({"source": "Current", "label": item.title or "Current Poster", "url": item.poster_url})
     return {"candidates": cands}
 
 @app.post("/api/media/{item_id}/poster")
@@ -259,7 +269,13 @@ def api_set_media_poster(item_id: int, payload: dict, db: Session = Depends(get_
         return {"ok": False, "error": "Item not found"}
     new_url = (payload.get("poster_url") or "").strip()
     item.poster_url = new_url or None
-    db.add(HistoryLog(event_type="PosterUpdated", title=item.title, details=f"Updated artwork -> {new_url[:80]}"))
+    from app import models as _models
+    _hist_cls = globals().get("HistoryLog") or getattr(_models, "HistoryLog", None)
+    if _hist_cls is not None:
+        try:
+            db.add(_hist_cls(event_type="PosterUpdated", title=item.title, details=f"Updated artwork -> {new_url[:80]}"))
+        except Exception:
+            pass
     db.commit()
     return {"ok": True, "poster_url": item.poster_url}
 
